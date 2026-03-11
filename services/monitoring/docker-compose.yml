@@ -1,0 +1,78 @@
+# Optional: Prometheus + Grafana + cAdvisor
+# Start after first-time setup:
+#   docker compose -f services/monitoring/docker-compose.yml --env-file ../../.env up -d
+#
+# Grafana: set GRAFANA_HOST in .env + DNS; protect with GF_SECURITY_ADMIN_PASSWORD + Traefik basic auth recommended.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-change_me}
+      - GF_SERVER_ROOT_URL=https://${GRAFANA_HOST}
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - backend
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      # Optional: basic auth in front of Grafana (htpasswd -> GRAFANA_TRAEFIK_AUTH)
+      # - "traefik.http.routers.grafana.middlewares=grafana-auth"
+      # - "traefik.http.middlewares.grafana-auth.basicauth.users=${GRAFANA_TRAEFIK_AUTH}"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - backend
+
+volumes:
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PROMETHEUS_DATA_DIR:-./data/prometheus}
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${GRAFANA_DATA_DIR:-./data/grafana}
+
+networks:
+  backend:
+    external: true
+  proxy:
+    external: true

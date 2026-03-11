@@ -1,0 +1,41 @@
+# Portainer Community Edition – 100% free, open-source Docker UI
+# https://docs.portainer.io/start/install/server/docker
+#
+# Start:
+#   mkdir -p /opt/volumes/portainer
+#   Set PORTAINER_HOST in .env (DNS → VPS)
+#   docker compose -f services/portainer/docker-compose.yml --env-file ../../.env up -d
+#
+# First visit: create admin user in browser. Protect with strong password + optional Traefik basic auth.
+
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+      # Strongly recommended: basic auth in front (htpasswd → PORTAINER_TRAEFIK_AUTH)
+      # - "traefik.http.routers.portainer.middlewares=portainer-auth"
+      # - "traefik.http.middlewares.portainer-auth.basicauth.users=${PORTAINER_TRAEFIK_AUTH}"
+
+volumes:
+  portainer_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PORTAINER_DATA_DIR:-./data}
+
+networks:
+  proxy:
+    external: true

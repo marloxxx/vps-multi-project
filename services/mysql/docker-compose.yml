@@ -1,0 +1,27 @@
+# Optional MySQL – backend only; enable if a project needs MySQL instead of/in addition to Postgres
+# 8.4 – no default-authentication-plugin=mysql_native_password (removed); default caching_sha2_password
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - backend
+
+volumes:
+  mysql_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${MYSQL_DATA_DIR:-./data}
+
+networks:
+  backend:
+    external: true

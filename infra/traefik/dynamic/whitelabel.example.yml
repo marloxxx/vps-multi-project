@@ -1,0 +1,16 @@
+# Example only – copy to e.g. extra-hosts.yml and adjust.
+# Requires Traefik file provider (see docs/TRAEFIK.md) and target container on proxy network.
+#
+# http:
+#   routers:
+#     extra:
+#       rule: Host(`extra.example.com`)
+#       entryPoints: [websecure]
+#       service: my-backend
+#       tls:
+#         certResolver: letsencrypt
+#   services:
+#     my-backend:
+#       loadBalancer:
+#         servers:
+#           - url: "http://<container_name>:<port>"

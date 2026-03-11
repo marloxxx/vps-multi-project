@@ -1,0 +1,19 @@
+# Secrets and local env
+.env
+**/.env
+!**/.env.example
+
+# Traefik ACME storage (contains certs)
+**/acme.json
+
+# Persistent data (if bind-mounted inside repo)
+**/data/
+volumes/
+
+# One-time setup credentials – delete after copy
+.setup-credentials.txt
+setup-credentials-*.txt
+.ssh-port
+
+# OS
+.DS_Store

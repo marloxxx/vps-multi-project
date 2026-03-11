@@ -1,0 +1,27 @@
+# Traefik reverse proxy – attach all public apps to network "proxy"
+# Load root .env from repo root: docker compose --env-file ../../.env up -d
+
+services:
+  traefik:
+    image: traefik:v3.2
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      # ACME email from root .env (static YAML does not expand env)
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./acme.json:/letsencrypt/acme.json
+    networks:
+      - proxy
+    # Optional: expose dashboard via HTTPS – see docker-compose.dashboard.yml
+
+networks:
+  proxy:
+    external: true

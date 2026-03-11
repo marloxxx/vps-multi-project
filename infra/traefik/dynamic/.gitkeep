@@ -1,0 +1,2 @@
+# Optional dynamic config – mount as /etc/traefik/dynamic in traefik compose
+# See docs/TRAEFIK.md
