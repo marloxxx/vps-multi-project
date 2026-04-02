@@ -15,6 +15,9 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-}
     volumes:
       - mysql_data:/var/lib/mysql
+    # Host 3306 → remote tools / restore (mysql client, GUI). Lock down with ufw/provider firewall to your IP.
+    ports:
+      - "3306:3306"
     networks:
       - backend
 
