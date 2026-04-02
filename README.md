@@ -17,6 +17,8 @@ chmod +x setup.sh && ./setup.sh
 
 **SSH** moves to a **random port (20000–40000)**; `ufw` allows that port plus 80/443 (and 22 until you migrate). Port is in **`.ssh-port`** and in the credentials output.
 
+**CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
+
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
 **Skip monitoring:** `START_MONITORING=0 ./setup.sh`  
@@ -38,6 +40,39 @@ chmod +x setup.sh && ./setup.sh
 /opt/stack/scripts/backup-postgres.sh
 /opt/stack/scripts/backup-postgres-all-dbs.sh
 /opt/stack/scripts/restore-drill.sh
+```
+
+## Management CLI (menu + `/usr/bin`)
+
+```bash
+cd /opt/stack
+chmod +x scripts/stack-manage.sh
+./scripts/stack-manage.sh menu
+```
+
+Install global command:
+
+```bash
+cd /opt/stack
+./scripts/stack-manage.sh install-bin stackctl
+stackctl menu
+```
+
+Common commands:
+
+```bash
+stackctl status
+stackctl start core
+stackctl logs postgres
+stackctl backup
+```
+
+Temporary DB firewall access (prefer restricted source IP):
+
+```bash
+stackctl open-db-port postgres 203.0.113.10
+# ... do your remote DB session ...
+stackctl close-db-port postgres 203.0.113.10
 ```
 
 ## Security checklist

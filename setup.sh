@@ -31,6 +31,8 @@ SWAP_SIZE_GB="${SWAP_SIZE_GB:-2}"
 SWAP_FILE="${SWAP_FILE:-/swapfile}"
 CREDENTIALS_FILE="$ROOT/.setup-credentials.txt"
 SSH_PORT_FILE="$ROOT/.ssh-port"
+STACKCTL_BIN_NAME="${STACKCTL_BIN_NAME:-stackctl}"
+AUTO_INSTALL_STACKCTL="${AUTO_INSTALL_STACKCTL:-1}"
 
 # ---------- portable sed in-place ----------
 sed_inplace() {
@@ -270,6 +272,27 @@ ROOTSCRIPT
   fi
 }
 
+# ---------- install stack manage command ----------
+install_stackctl_bin() {
+  [[ "$AUTO_INSTALL_STACKCTL" == "1" ]] || {
+    info "Skipping stackctl install (AUTO_INSTALL_STACKCTL=0)"
+    return 0
+  }
+
+  local source_script="$ROOT/scripts/stack-manage.sh"
+  local target="/usr/bin/$STACKCTL_BIN_NAME"
+
+  if [[ ! -f "$source_script" ]]; then
+    warn "Skipping stackctl install: missing $source_script"
+    return 0
+  fi
+
+  chmod +x "$source_script"
+  step "Installing /usr/bin/$STACKCTL_BIN_NAME"
+  sudo ln -sf "$source_script" "$target"
+  info "Use command: $STACKCTL_BIN_NAME menu"
+}
+
 # ---------- final banner ----------
 print_credentials_banner() {
   if [[ ! -f "$CREDENTIALS_FILE" ]]; then
@@ -295,6 +318,7 @@ ensure_env
 generate_secrets
 docker_phase
 host_phase
+install_stackctl_bin
 print_credentials_banner
 
 step "Finished"
