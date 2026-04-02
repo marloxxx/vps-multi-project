@@ -147,7 +147,7 @@ generate_secrets() {
   [[ "$need_gen" -eq 1 ]] || return 0
 
   step "Generating random passwords for .env"
-  local pg redis minio mysql grafana traefik_dash_plain traefik_dash_hash
+  local pg redis minio mysql grafana traefik_dash_plain traefik_dash_hash traefik_dash_hash_env
   pg="$(generate_secret 24 32)"
   redis="$(generate_secret 24 32)"
   minio="$(generate_secret 24 32)"
@@ -171,8 +171,10 @@ generate_secrets() {
   if ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" || grep -qE '^TRAEFIK_DASHBOARD_AUTH=$|^TRAEFIK_DASHBOARD_AUTH=.*change_me.*' "$ENV_FILE"; then
     traefik_dash_plain="$(generate_secret 18 24)"
     traefik_dash_hash="$(openssl passwd -apr1 "$traefik_dash_plain")"
+    # .env is sourced by bash; '$' in htpasswd hash must be escaped.
+    traefik_dash_hash_env="${traefik_dash_hash//\$/\$\$}"
     sed_inplace "/^TRAEFIK_DASHBOARD_AUTH=/d" "$ENV_FILE"
-    echo "TRAEFIK_DASHBOARD_AUTH=admin:${traefik_dash_hash}" >> "$ENV_FILE"
+    echo "TRAEFIK_DASHBOARD_AUTH=admin:${traefik_dash_hash_env}" >> "$ENV_FILE"
   fi
   load_env
   # Stash detailed credentials file (no SSH port yet)
