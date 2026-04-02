@@ -34,6 +34,7 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 
 | Path / doc | Purpose |
 |------------|--------|
+| `docs/APP-INTEGRATION.md` | New apps: `proxy` / `backend`, Traefik, DBs |
 | `docs/TRAEFIK.md` | Multi-host, TLS |
 | `docs/POSTGRES.md` | Backups, multi-DB |
 | `docs/TOOLS.md` | Operational tools |
