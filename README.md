@@ -6,7 +6,7 @@ Layout: **`/opt/stack`**, **`/opt/volumes`**, **`/opt/backups`**.
 
 ```bash
 sudo mkdir -p /opt && sudo chown "$USER":"$USER" /opt
-git clone <repo-url> /opt/stack
+git clone https://github.com/marloxxx/vps-multi-project.git /opt/stack
 cd /opt/stack
 chmod +x setup.sh && ./setup.sh
 ```
@@ -22,6 +22,8 @@ chmod +x setup.sh && ./setup.sh
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
 **Skip monitoring:** `START_MONITORING=0 ./setup.sh`  
+**Skip Portainer:** `START_PORTAINER=0 ./setup.sh`  
+**Custom CLI name:** `STACKCTL_BIN_NAME=vpsctl ./setup.sh`  
 **Re-run secrets only:** `REGENERATE_SECRETS=1 ./setup.sh` (overwrites password lines in `.env`).
 
 ## Layout & docs
@@ -60,6 +62,11 @@ stackctl menu
 
 `install-bin` is still available for manual reinstall or custom command names, but `setup.sh` now installs `stackctl` automatically by default.
 
+Service groups:
+
+- `core`: `traefik postgres redis minio mysql`
+- `all`: `traefik postgres redis minio mysql monitoring portainer`
+
 Common commands:
 
 ```bash
@@ -73,6 +80,17 @@ stackctl mysql
 stackctl credentials all
 ```
 
+Credentials targets:
+
+```bash
+stackctl credentials postgres
+stackctl credentials redis
+stackctl credentials minio
+stackctl credentials monitoring
+stackctl credentials mysql
+stackctl credentials portainer
+```
+
 Audit log:
 
 ```bash
@@ -82,9 +100,9 @@ tail -f /opt/stack/logs/stackctl.log
 Temporary DB firewall access (prefer restricted source IP):
 
 ```bash
-stackctl open-db-port postgres 203.0.113.10
+stackctl open-db-port postgres <your-client-public-ip>
 # ... do your remote DB session ...
-stackctl close-db-port postgres 203.0.113.10
+stackctl close-db-port postgres <your-client-public-ip>
 ```
 
 ## Security checklist
