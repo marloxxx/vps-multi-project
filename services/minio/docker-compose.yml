@@ -1,4 +1,4 @@
-# MinIO – S3 API + console behind Traefik (proxy) + data on backend
+# MinIO – S3 API + console behind Traefik (proxy); 127.0.0.1 for VPS/local clients + data on backend
 # Set MINIO_API_HOST / MINIO_CONSOLE_HOST in root .env
 
 services:
@@ -12,6 +12,10 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
+    # Loopback: S3 API 9000, console 9001 — or ssh -L 9000:127.0.0.1:9000 -L 9001:127.0.0.1:9001 user@vps
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     networks:
       - backend
       - proxy
