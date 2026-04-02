@@ -13,7 +13,7 @@ chmod +x setup.sh && ./setup.sh
 
 **Interactive:** prompts for **base domain** and **ACME email** if `.env` is missing.
 
-**Automatic:** random passwords for Postgres, Redis, MinIO (and Grafana if monitoring is on), written to **`.env`** and **`.setup-credentials.txt`**. A **banner at the end** prints the same – **copy to a password manager, then delete** `.setup-credentials.txt`.
+**Automatic:** random passwords for Postgres, MySQL, Redis, MinIO (and Grafana if monitoring is on), plus a detailed service credential summary, written to **`.env`** and **`.setup-credentials.txt`**. A **banner at the end** prints the same – **copy to a password manager, then delete** `.setup-credentials.txt`.
 
 **SSH** moves to a **random port (20000–40000)**; `ufw` allows that port plus 80/443 (and 22 until you migrate). Port is in **`.ssh-port`** and in the credentials output.
 
@@ -79,6 +79,24 @@ stackctl logs postgres
 stackctl backup
 stackctl mysql
 stackctl credentials all
+stackctl provision-db mysql billing
+stackctl provision-db postgres clay_erp
+```
+
+Project DB provisioning (auto-create db/user/password):
+
+```bash
+stackctl provision-mysql my_project
+stackctl provision-postgres my_project
+# or generic:
+stackctl provision-db mysql my_project
+stackctl provision-db postgres my_project
+```
+
+Generated project credentials are appended to:
+
+```bash
+/opt/stack/.project-db-credentials.txt
 ```
 
 Credentials targets:

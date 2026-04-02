@@ -18,6 +18,7 @@ SERVICE_LIST="traefik postgres redis minio monitoring mysql portainer"
 CORE_LIST="traefik postgres redis minio mysql"
 LOG_DIR="${STACK_LOG_DIR:-$ROOT/logs}"
 AUDIT_LOG_FILE="${STACK_AUDIT_LOG_FILE:-$LOG_DIR/stackctl.log}"
+PROJECT_CREDS_FILE="${STACK_PROJECT_CREDS_FILE:-$ROOT/.project-db-credentials.txt}"
 
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 
@@ -28,6 +29,54 @@ audit_log() {
   host="$(hostname 2>/dev/null || echo unknown-host)"
   ts="$(date -Iseconds)"
   printf '%s | host=%s | user=%s | action=%s\n' "$ts" "$host" "$actor" "$action" >> "$AUDIT_LOG_FILE" 2>/dev/null || true
+}
+
+require_cmd() {
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || {
+    echo "Missing required command: $cmd"
+    return 1
+  }
+}
+
+generate_secret() {
+  require_cmd openssl
+  openssl rand -base64 24 | tr -d '/+=' | head -c 32
+}
+
+normalise_project_name() {
+  local raw="${1:-}"
+  local name
+  name="$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//; s/__+/_/g')"
+  [[ -n "$name" ]] || {
+    echo "Invalid project name: '$raw'"
+    return 1
+  }
+  echo "$name"
+}
+
+sql_escape_single() {
+  local s="${1:-}"
+  printf "%s" "${s//\'/\'\'}"
+}
+
+save_project_credentials() {
+  local engine="$1"
+  local project="$2"
+  local db_name="$3"
+  local db_user="$4"
+  local db_password="$5"
+
+  {
+    echo "# $(date -Iseconds)"
+    echo "ENGINE=$engine"
+    echo "PROJECT=$project"
+    echo "DB_NAME=$db_name"
+    echo "DB_USER=$db_user"
+    echo "DB_PASSWORD=$db_password"
+    echo ""
+  } >> "$PROJECT_CREDS_FILE"
+  chmod 600 "$PROJECT_CREDS_FILE" 2>/dev/null || true
 }
 
 service_compose_file() {
@@ -429,6 +478,115 @@ health_check() {
   esac
 }
 
+provision_mysql_project() {
+  local raw_project="${1:-}"
+  [[ -n "$raw_project" ]] || {
+    echo "Usage: stackctl provision-mysql <project-name>"
+    return 1
+  }
+  audit_log "provision-mysql project=$raw_project"
+
+  local project db_name db_user db_password user_host esc_pass
+  project="$(normalise_project_name "$raw_project")"
+  db_name="${project}_db"
+  db_user="${project}_app"
+  db_password="$(generate_secret)"
+  user_host="${PROJECT_DB_USER_HOST:-%}"
+  esc_pass="$(sql_escape_single "$db_password")"
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  [[ -n "${MYSQL_ROOT_PASSWORD:-}" ]] || {
+    echo "MYSQL_ROOT_PASSWORD is not set in $ENV_FILE"
+    return 1
+  }
+  is_running mysql || {
+    echo "MySQL container is not running."
+    echo "Start it with: stackctl start mysql"
+    return 1
+  }
+
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "CREATE USER IF NOT EXISTS '$db_user'@'$user_host' IDENTIFIED BY '$esc_pass';"
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "ALTER USER '$db_user'@'$user_host' IDENTIFIED BY '$esc_pass';"
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP ON \`$db_name\`.* TO '$db_user'@'$user_host'; FLUSH PRIVILEGES;"
+
+  save_project_credentials "mysql" "$project" "$db_name" "$db_user" "$db_password"
+
+  echo "MySQL project provisioned:"
+  echo "  PROJECT=$project"
+  echo "  DB_NAME=$db_name"
+  echo "  DB_USER=$db_user"
+  echo "  DB_PASSWORD=$db_password"
+  echo "Saved to: $PROJECT_CREDS_FILE"
+}
+
+provision_postgres_project() {
+  local raw_project="${1:-}"
+  [[ -n "$raw_project" ]] || {
+    echo "Usage: stackctl provision-postgres <project-name>"
+    return 1
+  }
+  audit_log "provision-postgres project=$raw_project"
+
+  local project db_name db_user db_password esc_pass role_exists db_exists
+  project="$(normalise_project_name "$raw_project")"
+  db_name="${project}_db"
+  db_user="${project}_app"
+  db_password="$(generate_secret)"
+  esc_pass="$(sql_escape_single "$db_password")"
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  is_running postgres || {
+    echo "PostgreSQL container is not running."
+    echo "Start it with: stackctl start postgres"
+    return 1
+  }
+
+  role_exists="$(docker exec postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$db_user';" | tr -d '[:space:]')"
+  if [[ "$role_exists" == "1" ]]; then
+    docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"$db_user\" WITH LOGIN PASSWORD '$esc_pass';"
+  else
+    docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE \"$db_user\" WITH LOGIN PASSWORD '$esc_pass';"
+  fi
+
+  db_exists="$(docker exec postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name';" | tr -d '[:space:]')"
+  if [[ "$db_exists" != "1" ]]; then
+    docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$db_name\" OWNER \"$db_user\";"
+  fi
+
+  docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"$db_name\" TO \"$db_user\";"
+
+  save_project_credentials "postgres" "$project" "$db_name" "$db_user" "$db_password"
+
+  echo "PostgreSQL project provisioned:"
+  echo "  PROJECT=$project"
+  echo "  DB_NAME=$db_name"
+  echo "  DB_USER=$db_user"
+  echo "  DB_PASSWORD=$db_password"
+  echo "Saved to: $PROJECT_CREDS_FILE"
+}
+
+provision_project_db() {
+  local engine="${1:-}"
+  local project="${2:-}"
+  case "$engine" in
+    mysql) provision_mysql_project "$project" ;;
+    postgres|pgsql|postgresql) provision_postgres_project "$project" ;;
+    *)
+      echo "Usage: stackctl provision-db <mysql|postgres> <project-name>"
+      return 1
+      ;;
+  esac
+}
+
 print_help() {
   cat <<'EOF'
 Usage:
@@ -448,6 +606,9 @@ Commands:
   restore-drill [dump-file]    Test restore into temp database
   psql [db]                    Open psql shell in postgres container
   mysql [db]                   Open mysql shell in mysql container
+  provision-mysql <project>    Create isolated mysql db/user/password
+  provision-postgres <project> Create isolated postgres db/user/password
+  provision-db <engine> <name> Create isolated db/user/password
   credentials [service|all]    Show credentials from .env
   open-db-port [db] [ip]       Open DB firewall port (db: postgres|mysql)
   close-db-port [db] [ip]      Close DB firewall port (db: postgres|mysql)
@@ -461,6 +622,8 @@ Examples:
   ./scripts/stack-manage.sh health all
   ./scripts/stack-manage.sh logs postgres
   ./scripts/stack-manage.sh mysql app
+  ./scripts/stack-manage.sh provision-db mysql billing
+  ./scripts/stack-manage.sh provision-db postgres clay_erp
   ./scripts/stack-manage.sh credentials postgres
   ./scripts/stack-manage.sh open-db-port postgres 203.0.113.10
   ./scripts/stack-manage.sh install-bin stackctl
@@ -485,8 +648,10 @@ Stack Management Menu
 11) Restore drill
 12) Open psql shell
 13) Open mysql shell
-14) Show credentials
-15) Install /usr/bin command
+14) Provision MySQL project DB
+15) Provision PostgreSQL project DB
+16) Show credentials
+17) Install /usr/bin command
 0) Exit
 EOF
     read -r -p "Choose: " choice
@@ -526,10 +691,18 @@ EOF
         mysql_shell "$db"
         ;;
       14)
+        read -r -p "Project name: " project
+        provision_mysql_project "$project"
+        ;;
+      15)
+        read -r -p "Project name: " project
+        provision_postgres_project "$project"
+        ;;
+      16)
         read -r -p "Target (all/postgres/redis/minio/monitoring/mysql/portainer) [all]: " target
         show_credentials "${target:-all}"
         ;;
-      15)
+      17)
         read -r -p "Command name (default stackctl): " name
         install_bin "${name:-stackctl}"
         ;;
@@ -553,6 +726,9 @@ case "$cmd" in
   restore-drill) restore_drill "${2:-}" ;;
   psql) psql_shell "${2:-}" ;;
   mysql) mysql_shell "${2:-}" ;;
+  provision-mysql) provision_mysql_project "${2:-}" ;;
+  provision-postgres) provision_postgres_project "${2:-}" ;;
+  provision-db) provision_project_db "${2:-}" "${3:-}" ;;
   credentials) show_credentials "${2:-all}" ;;
   open-db-port) open_db_port "${2:-postgres}" "${3:-}" ;;
   close-db-port) close_db_port "${2:-postgres}" "${3:-}" ;;

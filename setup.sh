@@ -92,19 +92,28 @@ generate_secrets() {
   local need_gen=0
   if [[ "${REGENERATE_SECRETS:-0}" == "1" ]]; then
     need_gen=1
-  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|MINIO_ROOT_PASSWORD=change_me|POSTGRES_PASSWORD=change_me_strong' "$ENV_FILE" 2>/dev/null; then
+  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|MINIO_ROOT_PASSWORD=change_me|POSTGRES_PASSWORD=change_me_strong|MYSQL_ROOT_PASSWORD=change_me_mysql' "$ENV_FILE" 2>/dev/null; then
     need_gen=1
   fi
   [[ "$need_gen" -eq 1 ]] || return 0
 
   step "Generating random passwords for .env"
-  local pg redis minio grafana
+  local pg redis minio grafana mysql
   pg="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
   redis="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
   minio="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
   sed_inplace "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg}|" "$ENV_FILE"
   sed_inplace "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis}|" "$ENV_FILE"
   sed_inplace "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${minio}|" "$ENV_FILE"
+  mysql="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+  if grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE"; then
+    sed_inplace "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=${mysql}|" "$ENV_FILE"
+  else
+    echo "MYSQL_ROOT_PASSWORD=${mysql}" >> "$ENV_FILE"
+  fi
+  if ! grep -q '^MYSQL_DATABASE=' "$ENV_FILE"; then
+    echo "MYSQL_DATABASE=app" >> "$ENV_FILE"
+  fi
   if grep -q '^GRAFANA_HOST=' "$ENV_FILE"; then
     grafana="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
     if grep -q '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE"; then
@@ -113,13 +122,45 @@ generate_secrets() {
       echo "GRAFANA_ADMIN_PASSWORD=${grafana}" >> "$ENV_FILE"
     fi
   fi
-  # Stash for credentials file (no SSH port yet)
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+  # Stash detailed credentials file (no SSH port yet)
   {
     echo "# Generated $(date -Iseconds) – delete after copying to a password manager"
-    echo "POSTGRES_PASSWORD=${pg}"
-    echo "REDIS_PASSWORD=${redis}"
-    echo "MINIO_ROOT_PASSWORD=${minio}"
-    [[ -n "${grafana:-}" ]] && echo "GRAFANA_ADMIN_PASSWORD=${grafana}"
+    echo ""
+    echo "[PostgreSQL]"
+    echo "POSTGRES_USER=${POSTGRES_USER:-postgres}"
+    echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-$pg}"
+    echo "POSTGRES_DB=${POSTGRES_DB:-app}"
+    echo ""
+    echo "[MySQL]"
+    echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-$mysql}"
+    echo "MYSQL_DATABASE=${MYSQL_DATABASE:-app}"
+    echo ""
+    echo "[Redis]"
+    echo "REDIS_PASSWORD=${REDIS_PASSWORD:-$redis}"
+    echo ""
+    echo "[MinIO]"
+    echo "MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}"
+    echo "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-$minio}"
+    echo "MINIO_API_HOST=${MINIO_API_HOST:-<not-set>}"
+    echo "MINIO_CONSOLE_HOST=${MINIO_CONSOLE_HOST:-<not-set>}"
+    if [[ -n "${GRAFANA_HOST:-}" ]]; then
+      echo ""
+      echo "[Grafana]"
+      echo "GRAFANA_HOST=${GRAFANA_HOST}"
+      echo "GRAFANA_ADMIN_USER=admin"
+      echo "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-${grafana:-<not-set>}}"
+    fi
+    if [[ -n "${PORTAINER_HOST:-}" ]]; then
+      echo ""
+      echo "[Portainer]"
+      echo "PORTAINER_HOST=${PORTAINER_HOST}"
+      echo "PORTAINER_NOTE=Create admin user on first login"
+      echo "PORTAINER_TRAEFIK_AUTH=${PORTAINER_TRAEFIK_AUTH:-<not-set>}"
+    fi
   } > "$CREDENTIALS_FILE"
   chmod 600 "$CREDENTIALS_FILE"
   info "Secrets written to .env and $CREDENTIALS_FILE"
