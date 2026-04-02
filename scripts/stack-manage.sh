@@ -219,7 +219,7 @@ mysql_shell() {
     echo "MYSQL_ROOT_PASSWORD is not set in $ENV_FILE"
     return 1
   }
-  docker ps --format '{{.Names}}' | rg -x 'mysql' >/dev/null || {
+  docker ps --format '{{.Names}}' | grep -Fx 'mysql' >/dev/null || {
     echo "MySQL container is not running (expected name: mysql)."
     echo "Start it with: stackctl start mysql"
     return 1
@@ -376,7 +376,7 @@ install_bin() {
 
 is_running() {
   local name="$1"
-  docker ps --format '{{.Names}}' | rg -x "$name" >/dev/null
+  docker ps --format '{{.Names}}' | grep -Fx "$name" >/dev/null
 }
 
 check_service_health() {
@@ -414,7 +414,7 @@ check_service_health() {
       # shellcheck source=/dev/null
       source "$ENV_FILE"
       set +a
-      if docker exec redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | rg -x "PONG" >/dev/null; then
+      if docker exec redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | grep -Fx "PONG" >/dev/null; then
         echo "OK   redis ping=PONG"
       else
         echo "FAIL redis ping failed"
