@@ -301,6 +301,7 @@ docker_phase() {
   export PROMETHEUS_DATA_DIR="${PROMETHEUS_DATA_DIR:-$OPT_BASE/volumes/prometheus}"
   export GRAFANA_DATA_DIR="${GRAFANA_DATA_DIR:-$OPT_BASE/volumes/grafana}"
   export PORTAINER_DATA_DIR="${PORTAINER_DATA_DIR:-$OPT_BASE/volumes/portainer}"
+  export MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-$OPT_BASE/volumes/mysql}"
 
   # Portainer + Traefik dashboard are mandatory in this stack.
   if ! grep -q '^PORTAINER_HOST=' "$ENV_FILE"; then
@@ -334,7 +335,7 @@ docker_phase() {
   fi
 
   mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$MINIO_DATA_DIR" "$BACKUP_DIR" \
-    "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR" "$PORTAINER_DATA_DIR"
+    "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR" "$PORTAINER_DATA_DIR" "$MYSQL_DATA_DIR"
 
   step "Starting Traefik + dashboard"
   docker compose -f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml" --env-file "$ENV_FILE" up -d

@@ -1,5 +1,7 @@
 # Optional MySQL – backend only; enable if a project needs MySQL instead of/in addition to Postgres
 # 8.4 – no default-authentication-plugin=mysql_native_password (removed); default caching_sha2_password
+#
+# Host data directory must exist before first start (setup.sh / stackctl create it when MYSQL_DATA_DIR is set).
 
 services:
   mysql:
@@ -22,7 +24,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${MYSQL_DATA_DIR:-./data}
+      device: ${MYSQL_DATA_DIR:-/opt/volumes/mysql}
 
 networks:
   backend:

@@ -105,6 +105,16 @@ require_compose_file() {
   }
 }
 
+# Bind-mounted MySQL data: Docker does not create the host path for driver local + bind.
+prepare_mysql_data_dir() {
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+  local dir="${MYSQL_DATA_DIR:-/opt/volumes/mysql}"
+  mkdir -p "$dir"
+}
+
 compose_run() {
   local service="$1"
   shift
@@ -121,6 +131,7 @@ run_on_group() {
     require_compose_file "$item" || continue
     echo "==> $action $item"
     if [[ "$action" == "up" ]]; then
+      [[ "$item" != "mysql" ]] || prepare_mysql_data_dir
       compose_run "$item" "$action" -d
     else
       compose_run "$item" "$action"
@@ -148,6 +159,7 @@ start_service() {
     *)
       require_compose_file "$target"
       echo "==> starting $target"
+      [[ "$target" != "mysql" ]] || prepare_mysql_data_dir
       compose_run "$target" up -d
       ;;
   esac
