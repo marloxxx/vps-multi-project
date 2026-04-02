@@ -14,8 +14,21 @@ ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required."; exit 1; }
 
-SERVICE_LIST="traefik postgres redis minio monitoring"
-CORE_LIST="traefik postgres redis minio"
+SERVICE_LIST="traefik postgres redis minio monitoring mysql portainer"
+CORE_LIST="traefik postgres redis minio mysql"
+LOG_DIR="${STACK_LOG_DIR:-$ROOT/logs}"
+AUDIT_LOG_FILE="${STACK_AUDIT_LOG_FILE:-$LOG_DIR/stackctl.log}"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+audit_log() {
+  local action="$1"
+  local actor host ts
+  actor="${SUDO_USER:-${USER:-unknown}}"
+  host="$(hostname 2>/dev/null || echo unknown-host)"
+  ts="$(date -Iseconds)"
+  printf '%s | host=%s | user=%s | action=%s\n' "$ts" "$host" "$actor" "$action" >> "$AUDIT_LOG_FILE" 2>/dev/null || true
+}
 
 service_compose_file() {
   case "$1" in
@@ -24,6 +37,8 @@ service_compose_file() {
     redis) echo "$ROOT/services/redis/docker-compose.yml" ;;
     minio) echo "$ROOT/services/minio/docker-compose.yml" ;;
     monitoring) echo "$ROOT/services/monitoring/docker-compose.yml" ;;
+    mysql) echo "$ROOT/services/mysql/docker-compose.yml" ;;
+    portainer) echo "$ROOT/services/portainer/docker-compose.yml" ;;
     *)
       echo "Unknown service: $1"
       echo "Valid services: $SERVICE_LIST"
@@ -56,21 +71,28 @@ run_on_group() {
   for item in $group; do
     require_compose_file "$item" || continue
     echo "==> $action $item"
-    compose_run "$item" "$action" -d
+    if [[ "$action" == "up" ]]; then
+      compose_run "$item" "$action" -d
+    else
+      compose_run "$item" "$action"
+    fi
   done
 }
 
 show_status() {
+  audit_log "status"
   echo "==> Docker containers"
   docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 }
 
 show_services() {
+  audit_log "services"
   echo "$SERVICE_LIST"
 }
 
 start_service() {
   local target="${1:-core}"
+  audit_log "start target=$target"
   case "$target" in
     all) run_on_group up "$SERVICE_LIST" ;;
     core) run_on_group up "$CORE_LIST" ;;
@@ -84,6 +106,7 @@ start_service() {
 
 stop_service() {
   local target="${1:-core}"
+  audit_log "stop target=$target"
   case "$target" in
     all) run_on_group down "$SERVICE_LIST" ;;
     core) run_on_group down "$CORE_LIST" ;;
@@ -97,36 +120,144 @@ stop_service() {
 
 restart_service() {
   local target="${1:-core}"
+  audit_log "restart target=$target"
   stop_service "$target"
   start_service "$target"
 }
 
 logs_service() {
   local service="${1:-postgres}"
+  audit_log "logs service=$service"
   shift || true
   require_compose_file "$service"
   compose_run "$service" logs -f --tail "${TAIL_LINES:-200}" "$@"
 }
 
 backup_db() {
+  audit_log "backup default-db"
   "$ROOT/scripts/backup-postgres.sh"
 }
 
 backup_all_dbs() {
+  audit_log "backup all-dbs"
   "$ROOT/scripts/backup-postgres-all-dbs.sh"
 }
 
 restore_drill() {
+  audit_log "restore-drill dump=${1:-latest}"
   "$ROOT/scripts/restore-drill.sh" "${1:-}"
 }
 
 psql_shell() {
+  audit_log "psql db=${1:-default}"
   set -a
   # shellcheck source=/dev/null
   source "$ENV_FILE"
   set +a
   local db="${1:-$POSTGRES_DB}"
   docker exec -it postgres psql -U "$POSTGRES_USER" -d "$db"
+}
+
+mysql_shell() {
+  audit_log "mysql-shell db=${1:-default}"
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  local db="${1:-${MYSQL_DATABASE:-}}"
+  [[ -n "${MYSQL_ROOT_PASSWORD:-}" ]] || {
+    echo "MYSQL_ROOT_PASSWORD is not set in $ENV_FILE"
+    return 1
+  }
+  docker ps --format '{{.Names}}' | rg -x 'mysql' >/dev/null || {
+    echo "MySQL container is not running (expected name: mysql)."
+    echo "Start it with: stackctl start mysql"
+    return 1
+  }
+
+  if [[ -n "$db" ]]; then
+    docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" -it mysql mysql -uroot "$db"
+  else
+    docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" -it mysql mysql -uroot
+  fi
+}
+
+print_var() {
+  local name="$1"
+  # shellcheck disable=SC2154
+  local value="${!name-}"
+  if [[ -n "${value:-}" ]]; then
+    printf '%s=%s\n' "$name" "$value"
+  else
+    printf '%s=%s\n' "$name" "<not-set>"
+  fi
+}
+
+show_credentials() {
+  local target="${1:-all}"
+  audit_log "credentials target=$target"
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  echo "WARNING: showing sensitive values from $ENV_FILE"
+  echo "Copy to password manager and avoid sharing this output."
+  echo ""
+
+  case "$target" in
+    all)
+      show_credentials postgres
+      echo ""
+      show_credentials redis
+      echo ""
+      show_credentials minio
+      echo ""
+      show_credentials monitoring
+      echo ""
+      show_credentials mysql
+      echo ""
+      show_credentials portainer
+      ;;
+    postgres)
+      echo "[postgres]"
+      print_var POSTGRES_USER
+      print_var POSTGRES_PASSWORD
+      print_var POSTGRES_DB
+      ;;
+    redis)
+      echo "[redis]"
+      print_var REDIS_PASSWORD
+      ;;
+    minio)
+      echo "[minio]"
+      print_var MINIO_ROOT_USER
+      print_var MINIO_ROOT_PASSWORD
+      print_var MINIO_API_HOST
+      print_var MINIO_CONSOLE_HOST
+      ;;
+    monitoring|grafana)
+      echo "[monitoring]"
+      print_var GRAFANA_HOST
+      print_var GRAFANA_ADMIN_PASSWORD
+      ;;
+    mysql)
+      echo "[mysql]"
+      print_var MYSQL_ROOT_PASSWORD
+      print_var MYSQL_DATABASE
+      ;;
+    portainer)
+      echo "[portainer]"
+      print_var PORTAINER_HOST
+      print_var PORTAINER_TRAEFIK_AUTH
+      ;;
+    *)
+      echo "Unknown credential target: $target"
+      echo "Valid targets: all, postgres, redis, minio, monitoring, mysql, portainer"
+      return 1
+      ;;
+  esac
 }
 
 db_port() {
@@ -144,6 +275,7 @@ db_port() {
 open_db_port() {
   local db_type="${1:-postgres}"
   local source_ip="${2:-}"
+  audit_log "open-db-port db=$db_type source=${source_ip:-any}"
   local port
   port="$(db_port "$db_type")"
 
@@ -163,6 +295,7 @@ open_db_port() {
 close_db_port() {
   local db_type="${1:-postgres}"
   local source_ip="${2:-}"
+  audit_log "close-db-port db=$db_type source=${source_ip:-any}"
   local port
   port="$(db_port "$db_type")"
 
@@ -177,6 +310,7 @@ close_db_port() {
 
 install_bin() {
   local bin_name="${1:-stackctl}"
+  audit_log "install-bin name=$bin_name"
   local target="/usr/bin/$bin_name"
   local source_script="$ROOT/scripts/stack-manage.sh"
 
@@ -191,6 +325,110 @@ install_bin() {
   echo "Installed. Use: $bin_name menu"
 }
 
+is_running() {
+  local name="$1"
+  docker ps --format '{{.Names}}' | rg -x "$name" >/dev/null
+}
+
+check_service_health() {
+  local service="$1"
+  case "$service" in
+    traefik|minio|portainer)
+      if is_running "$service"; then
+        echo "OK   $service is running"
+      else
+        echo "FAIL $service is not running"
+      fi
+      ;;
+    postgres)
+      if ! is_running postgres; then
+        echo "FAIL postgres is not running"
+        return
+      fi
+      set -a
+      # shellcheck source=/dev/null
+      source "$ENV_FILE"
+      set +a
+      if docker exec postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+        echo "OK   postgres accepts connections"
+      else
+        echo "FAIL postgres is running but not ready"
+      fi
+      ;;
+    redis)
+      if ! is_running redis; then
+        echo "FAIL redis is not running"
+        return
+      fi
+      set -a
+      # shellcheck source=/dev/null
+      source "$ENV_FILE"
+      set +a
+      if docker exec redis redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null | rg -x "PONG" >/dev/null; then
+        echo "OK   redis ping=PONG"
+      else
+        echo "FAIL redis ping failed"
+      fi
+      ;;
+    mysql)
+      if ! is_running mysql; then
+        echo "FAIL mysql is not running"
+        return
+      fi
+      set -a
+      # shellcheck source=/dev/null
+      source "$ENV_FILE"
+      set +a
+      if [[ -z "${MYSQL_ROOT_PASSWORD:-}" ]]; then
+        echo "WARN mysql running but MYSQL_ROOT_PASSWORD is not set"
+      elif docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysqladmin -uroot ping >/dev/null 2>&1; then
+        echo "OK   mysql accepts connections"
+      else
+        echo "FAIL mysql is running but ping failed"
+      fi
+      ;;
+    monitoring)
+      local missing=0
+      for ctr in prometheus grafana cadvisor; do
+        if is_running "$ctr"; then
+          echo "OK   $ctr is running"
+        else
+          echo "FAIL $ctr is not running"
+          missing=1
+        fi
+      done
+      [[ "$missing" -eq 0 ]] || true
+      ;;
+    *)
+      echo "Unknown health target: $service"
+      echo "Valid targets: all, core, $SERVICE_LIST"
+      return 1
+      ;;
+  esac
+}
+
+health_check() {
+  local target="${1:-all}"
+  audit_log "health target=$target"
+  echo "==> Health check ($target)"
+
+  case "$target" in
+    all)
+      for svc in $SERVICE_LIST; do
+        check_service_health "$svc"
+      done
+      ;;
+    core)
+      for svc in $CORE_LIST; do
+        check_service_health "$svc"
+      done
+      ;;
+    *)
+      check_service_health "$target"
+      ;;
+  esac
+}
+
 print_help() {
   cat <<'EOF'
 Usage:
@@ -203,11 +441,14 @@ Commands:
   start [core|all|service]     Start stack/service (default: core)
   stop [core|all|service]      Stop stack/service (default: core)
   restart [core|all|service]   Restart stack/service (default: core)
+  health [core|all|service]    Run basic health checks
   logs <service>               Follow logs for a service
   backup                       Backup default database
   backup-all                   Backup all databases
   restore-drill [dump-file]    Test restore into temp database
   psql [db]                    Open psql shell in postgres container
+  mysql [db]                   Open mysql shell in mysql container
+  credentials [service|all]    Show credentials from .env
   open-db-port [db] [ip]       Open DB firewall port (db: postgres|mysql)
   close-db-port [db] [ip]      Close DB firewall port (db: postgres|mysql)
   install-bin [name]           Install /usr/bin command (default: stackctl)
@@ -217,7 +458,10 @@ Commands:
 Examples:
   ./scripts/stack-manage.sh status
   ./scripts/stack-manage.sh start all
+  ./scripts/stack-manage.sh health all
   ./scripts/stack-manage.sh logs postgres
+  ./scripts/stack-manage.sh mysql app
+  ./scripts/stack-manage.sh credentials postgres
   ./scripts/stack-manage.sh open-db-port postgres 203.0.113.10
   ./scripts/stack-manage.sh install-bin stackctl
 EOF
@@ -232,14 +476,17 @@ Stack Management Menu
 2) Start core
 3) Stop core
 4) Restart core
-5) Start one service
-6) Stop one service
-7) Logs one service
-8) Backup default DB
-9) Backup all DBs
-10) Restore drill
-11) Open psql shell
-12) Install /usr/bin command
+5) Health check
+6) Start one service
+7) Stop one service
+8) Logs one service
+9) Backup default DB
+10) Backup all DBs
+11) Restore drill
+12) Open psql shell
+13) Open mysql shell
+14) Show credentials
+15) Install /usr/bin command
 0) Exit
 EOF
     read -r -p "Choose: " choice
@@ -249,28 +496,40 @@ EOF
       3) stop_service core ;;
       4) restart_service core ;;
       5)
-        read -r -p "Service name ($(show_services)): " svc
-        start_service "$svc"
+        read -r -p "Target (core/all/service) [all]: " target
+        health_check "${target:-all}"
         ;;
       6)
         read -r -p "Service name ($(show_services)): " svc
-        stop_service "$svc"
+        start_service "$svc"
         ;;
       7)
         read -r -p "Service name ($(show_services)): " svc
+        stop_service "$svc"
+        ;;
+      8)
+        read -r -p "Service name ($(show_services)): " svc
         logs_service "$svc"
         ;;
-      8) backup_db ;;
-      9) backup_all_dbs ;;
-      10)
+      9) backup_db ;;
+      10) backup_all_dbs ;;
+      11)
         read -r -p "Dump file path (empty = latest): " dump
         restore_drill "$dump"
         ;;
-      11)
+      12)
         read -r -p "Database name (empty = POSTGRES_DB): " db
         psql_shell "$db"
         ;;
-      12)
+      13)
+        read -r -p "Database name (empty = MYSQL_DATABASE): " db
+        mysql_shell "$db"
+        ;;
+      14)
+        read -r -p "Target (all/postgres/redis/minio/monitoring/mysql/portainer) [all]: " target
+        show_credentials "${target:-all}"
+        ;;
+      15)
         read -r -p "Command name (default stackctl): " name
         install_bin "${name:-stackctl}"
         ;;
@@ -287,11 +546,14 @@ case "$cmd" in
   start) start_service "${2:-core}" ;;
   stop) stop_service "${2:-core}" ;;
   restart) restart_service "${2:-core}" ;;
+  health) health_check "${2:-all}" ;;
   logs) logs_service "${2:-postgres}" ;;
   backup) backup_db ;;
   backup-all) backup_all_dbs ;;
   restore-drill) restore_drill "${2:-}" ;;
   psql) psql_shell "${2:-}" ;;
+  mysql) mysql_shell "${2:-}" ;;
+  credentials) show_credentials "${2:-all}" ;;
   open-db-port) open_db_port "${2:-postgres}" "${3:-}" ;;
   close-db-port) close_db_port "${2:-postgres}" "${3:-}" ;;
   install-bin) install_bin "${2:-stackctl}" ;;

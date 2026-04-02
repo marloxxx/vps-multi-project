@@ -149,6 +149,7 @@ docker_phase() {
   export BACKUP_DIR="${BACKUP_DIR:-$OPT_BASE/backups/postgres}"
   export PROMETHEUS_DATA_DIR="${PROMETHEUS_DATA_DIR:-$OPT_BASE/volumes/prometheus}"
   export GRAFANA_DATA_DIR="${GRAFANA_DATA_DIR:-$OPT_BASE/volumes/grafana}"
+  export PORTAINER_DATA_DIR="${PORTAINER_DATA_DIR:-$OPT_BASE/volumes/portainer}"
 
   step "Docker networks (proxy, backend)"
   for net in proxy backend; do
@@ -164,7 +165,7 @@ docker_phase() {
   fi
 
   mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$MINIO_DATA_DIR" "$BACKUP_DIR" \
-    "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR"
+    "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR" "$PORTAINER_DATA_DIR"
 
   step "Starting Traefik"
   docker compose -f "$ROOT/infra/traefik/docker-compose.yml" --env-file "$ENV_FILE" up -d
@@ -181,6 +182,14 @@ docker_phase() {
     docker compose -f "$ROOT/services/monitoring/docker-compose.yml" --env-file "$ENV_FILE" up -d
   else
     info "Monitoring skipped (set GRAFANA_HOST in .env and START_MONITORING=1 to enable)"
+  fi
+
+  if [[ -f "$ROOT/services/portainer/docker-compose.yml" && "${START_PORTAINER:-1}" == "1" ]] && \
+     grep -q '^PORTAINER_HOST=' "$ENV_FILE"; then
+    step "Starting Portainer"
+    docker compose -f "$ROOT/services/portainer/docker-compose.yml" --env-file "$ENV_FILE" up -d
+  else
+    info "Portainer skipped (set PORTAINER_HOST in .env and START_PORTAINER=1 to enable)"
   fi
 
   if [[ -f "$ROOT/apps/clay-erp/docker-compose.yml" && "${START_CLAY_ERP:-0}" == "1" ]]; then

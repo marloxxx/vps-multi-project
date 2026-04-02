@@ -58,13 +58,25 @@ cd /opt/stack
 stackctl menu
 ```
 
+`install-bin` is still available for manual reinstall or custom command names, but `setup.sh` now installs `stackctl` automatically by default.
+
 Common commands:
 
 ```bash
 stackctl status
 stackctl start core
+stackctl start portainer
+stackctl health all
 stackctl logs postgres
 stackctl backup
+stackctl mysql
+stackctl credentials all
+```
+
+Audit log:
+
+```bash
+tail -f /opt/stack/logs/stackctl.log
 ```
 
 Temporary DB firewall access (prefer restricted source IP):
