@@ -31,9 +31,7 @@ mkdir -p /opt/volumes/prometheus /opt/volumes/grafana
 docker compose -f services/monitoring/docker-compose.yml --env-file .env up -d
 ```
 
-Grafana → Prometheus data source `http://prometheus:9090`. Dashboard IDs **193** / **14282**.
-
----
+Grafana -> Prometheus data source `http://prometheus:9090`. Dashboard IDs **193** / **14282**.
 
 ## Other (not in compose)
 

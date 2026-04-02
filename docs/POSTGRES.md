@@ -8,7 +8,7 @@ Single **postgres** container; data under `/opt/volumes/postgres`. You can run *
 
 | Script | Purpose |
 |--------|--------|
-| `scripts/backup-postgres.sh` | Dumps **one** DB (`POSTGRES_DB` from `.env`) |
+| `scripts/backup-postgres.sh` | Dumps **one** DB (`POSTGRES_DB` from `.env`, or `postgres` if unset) |
 | `scripts/backup-postgres-all-dbs.sh` | Dumps **every** non-template DB (optional `DB_PREFIX=` to filter by name prefix) |
 | `scripts/restore-drill.sh` | Restores a dump into a **temporary** DB then drops it (proves backups work) |
 
@@ -36,5 +36,5 @@ All DBs share the same Postgres data directory (one volume). Connection string d
 
 ## Related
 
-- `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `BACKUP_DIR`
+- `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR` (`POSTGRES_DB` optional)
 - `services/postgres/docker-compose.yml` – container definition

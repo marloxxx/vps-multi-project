@@ -1,6 +1,6 @@
-# Optional: publish Traefik dashboard on TRAEFIK_DASHBOARD_HOST with TLS.
+# Publish Traefik dashboard on TRAEFIK_DASHBOARD_HOST with TLS.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dashboard.yml --env-file ../../.env up -d
-# Set TRAEFIK_DASHBOARD_HOST and TRAEFIK_DASHBOARD_AUTH (htpasswd) in root .env.
+# Requires TRAEFIK_DASHBOARD_HOST and TRAEFIK_DASHBOARD_AUTH (htpasswd) in root .env.
 
 services:
   traefik:

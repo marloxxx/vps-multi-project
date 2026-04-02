@@ -33,7 +33,8 @@ CREDENTIALS_FILE="$ROOT/.setup-credentials.txt"
 SSH_PORT_FILE="$ROOT/.ssh-port"
 STACKCTL_BIN_NAME="${STACKCTL_BIN_NAME:-stackctl}"
 AUTO_INSTALL_STACKCTL="${AUTO_INSTALL_STACKCTL:-1}"
-AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
+AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-1}"
+SYNC_HOSTS_WITH_BASE_DOMAIN="${SYNC_HOSTS_WITH_BASE_DOMAIN:-1}"
 
 # ---------- portable sed in-place ----------
 sed_inplace() {
@@ -41,6 +42,27 @@ sed_inplace() {
     sed -i "$@"
   else
     sed -i '' "$@"
+  fi
+}
+
+load_env() {
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+}
+
+generate_secret() {
+  openssl rand -base64 "${1:-24}" | tr -d '/+=' | head -c "${2:-32}"
+}
+
+set_or_append_env() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed_inplace "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
   fi
 }
 
@@ -87,45 +109,72 @@ ensure_env() {
   echo ""
 }
 
+# ---------- enforce hostnames from BASE_DOMAIN ----------
+enforce_base_domain_hosts() {
+  load_env
+
+  local base_domain="${BASE_DOMAIN:-}"
+  [[ -n "$base_domain" ]] || {
+    echo "BASE_DOMAIN is required in $ENV_FILE"
+    exit 1
+  }
+
+  if [[ "$SYNC_HOSTS_WITH_BASE_DOMAIN" != "1" ]]; then
+    info "Skipping host sync (SYNC_HOSTS_WITH_BASE_DOMAIN=0)"
+    return 0
+  fi
+
+  step "Aligning service hosts to BASE_DOMAIN (${base_domain})"
+  set_or_append_env TRAEFIK_DASHBOARD_HOST "traefik.${base_domain}"
+  set_or_append_env PORTAINER_HOST "portainer.${base_domain}"
+  set_or_append_env GRAFANA_HOST "grafana.${base_domain}"
+  set_or_append_env MINIO_CONSOLE_HOST "storage.${base_domain}"
+  set_or_append_env MINIO_API_HOST "s3.${base_domain}"
+}
+
 # ---------- generate secrets into .env + stash for final print ----------
 generate_secrets() {
   local need_gen=0
   if [[ "${REGENERATE_SECRETS:-0}" == "1" ]]; then
     need_gen=1
-  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|MINIO_ROOT_PASSWORD=change_me|POSTGRES_PASSWORD=change_me_strong|MYSQL_ROOT_PASSWORD=change_me_mysql' "$ENV_FILE" 2>/dev/null; then
+  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|MINIO_ROOT_PASSWORD=change_me|POSTGRES_PASSWORD=change_me_strong|MYSQL_ROOT_PASSWORD=change_me_mysql|TRAEFIK_DASHBOARD_AUTH=.*change_me' "$ENV_FILE" 2>/dev/null; then
+    need_gen=1
+  elif ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" 2>/dev/null; then
+    need_gen=1
+  elif ! grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
     need_gen=1
   fi
   [[ "$need_gen" -eq 1 ]] || return 0
 
   step "Generating random passwords for .env"
-  local pg redis minio grafana mysql
-  pg="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
-  redis="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
-  minio="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+  local pg redis minio mysql grafana traefik_dash_plain traefik_dash_hash
+  pg="$(generate_secret 24 32)"
+  redis="$(generate_secret 24 32)"
+  minio="$(generate_secret 24 32)"
   sed_inplace "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg}|" "$ENV_FILE"
   sed_inplace "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis}|" "$ENV_FILE"
   sed_inplace "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${minio}|" "$ENV_FILE"
-  mysql="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+  mysql="$(generate_secret 24 32)"
   if grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE"; then
     sed_inplace "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=${mysql}|" "$ENV_FILE"
   else
     echo "MYSQL_ROOT_PASSWORD=${mysql}" >> "$ENV_FILE"
   fi
-  if ! grep -q '^MYSQL_DATABASE=' "$ENV_FILE"; then
-    echo "MYSQL_DATABASE=app" >> "$ENV_FILE"
-  fi
   if grep -q '^GRAFANA_HOST=' "$ENV_FILE"; then
-    grafana="$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)"
+    grafana="$(generate_secret 24 32)"
     if grep -q '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE"; then
       sed_inplace "s|^GRAFANA_ADMIN_PASSWORD=.*|GRAFANA_ADMIN_PASSWORD=${grafana}|" "$ENV_FILE"
     else
       echo "GRAFANA_ADMIN_PASSWORD=${grafana}" >> "$ENV_FILE"
     fi
   fi
-  set -a
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-  set +a
+  if ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" || grep -qE '^TRAEFIK_DASHBOARD_AUTH=$|^TRAEFIK_DASHBOARD_AUTH=.*change_me.*' "$ENV_FILE"; then
+    traefik_dash_plain="$(generate_secret 18 24)"
+    traefik_dash_hash="$(openssl passwd -apr1 "$traefik_dash_plain")"
+    sed_inplace "/^TRAEFIK_DASHBOARD_AUTH=/d" "$ENV_FILE"
+    echo "TRAEFIK_DASHBOARD_AUTH=admin:${traefik_dash_hash}" >> "$ENV_FILE"
+  fi
+  load_env
   # Stash detailed credentials file (no SSH port yet)
   {
     echo "# Generated $(date -Iseconds) – delete after copying to a password manager"
@@ -133,11 +182,11 @@ generate_secrets() {
     echo "[PostgreSQL]"
     echo "POSTGRES_USER=${POSTGRES_USER:-postgres}"
     echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-$pg}"
-    echo "POSTGRES_DB=${POSTGRES_DB:-app}"
+    echo "POSTGRES_DB=${POSTGRES_DB:-<not-set>}"
     echo ""
     echo "[MySQL]"
     echo "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-$mysql}"
-    echo "MYSQL_DATABASE=${MYSQL_DATABASE:-app}"
+    echo "MYSQL_DATABASE=${MYSQL_DATABASE:-<not-set>}"
     echo ""
     echo "[Redis]"
     echo "REDIS_PASSWORD=${REDIS_PASSWORD:-$redis}"
@@ -153,6 +202,15 @@ generate_secrets() {
       echo "GRAFANA_HOST=${GRAFANA_HOST}"
       echo "GRAFANA_ADMIN_USER=admin"
       echo "GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-${grafana:-<not-set>}}"
+    fi
+    echo ""
+    echo "[Traefik Dashboard]"
+    echo "TRAEFIK_DASHBOARD_HOST=${TRAEFIK_DASHBOARD_HOST:-<not-set>}"
+    echo "TRAEFIK_DASHBOARD_USER=admin"
+    if [[ -n "${traefik_dash_plain:-}" ]]; then
+      echo "TRAEFIK_DASHBOARD_PASSWORD=${traefik_dash_plain}"
+    else
+      echo "TRAEFIK_DASHBOARD_PASSWORD=<unchanged>"
     fi
     if [[ -n "${PORTAINER_HOST:-}" ]]; then
       echo ""
@@ -182,7 +240,7 @@ install_docker_if_missing() {
 
   if [[ "$AUTO_INSTALL_DOCKER" != "1" ]]; then
     echo "Docker not available. Install and start Docker then re-run."
-    echo "Tip: run with AUTO_INSTALL_DOCKER=1 to auto-install Docker."
+    echo "AUTO_INSTALL_DOCKER is disabled; set AUTO_INSTALL_DOCKER=1 to auto-install Docker."
     exit 1
   fi
 
@@ -232,10 +290,7 @@ preflight() {
 
 # ---------- docker phase ----------
 docker_phase() {
-  set -a
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-  set +a
+  load_env
 
   export POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-$OPT_BASE/volumes/postgres}"
   export REDIS_DATA_DIR="${REDIS_DATA_DIR:-$OPT_BASE/volumes/redis}"
@@ -244,6 +299,24 @@ docker_phase() {
   export PROMETHEUS_DATA_DIR="${PROMETHEUS_DATA_DIR:-$OPT_BASE/volumes/prometheus}"
   export GRAFANA_DATA_DIR="${GRAFANA_DATA_DIR:-$OPT_BASE/volumes/grafana}"
   export PORTAINER_DATA_DIR="${PORTAINER_DATA_DIR:-$OPT_BASE/volumes/portainer}"
+
+  # Portainer + Traefik dashboard are mandatory in this stack.
+  if ! grep -q '^PORTAINER_HOST=' "$ENV_FILE"; then
+    echo "Missing required PORTAINER_HOST in $ENV_FILE"
+    exit 1
+  fi
+  if ! grep -q '^TRAEFIK_DASHBOARD_HOST=' "$ENV_FILE"; then
+    echo "Missing required TRAEFIK_DASHBOARD_HOST in $ENV_FILE"
+    exit 1
+  fi
+  if ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE"; then
+    echo "Missing required TRAEFIK_DASHBOARD_AUTH in $ENV_FILE"
+    exit 1
+  fi
+  if [[ "${TRAEFIK_DASHBOARD_AUTH:-}" == "" ]]; then
+    echo "TRAEFIK_DASHBOARD_AUTH cannot be empty in $ENV_FILE"
+    exit 1
+  fi
 
   step "Docker networks (proxy, backend)"
   for net in proxy backend; do
@@ -261,8 +334,8 @@ docker_phase() {
   mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$MINIO_DATA_DIR" "$BACKUP_DIR" \
     "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR" "$PORTAINER_DATA_DIR"
 
-  step "Starting Traefik"
-  docker compose -f "$ROOT/infra/traefik/docker-compose.yml" --env-file "$ENV_FILE" up -d
+  step "Starting Traefik + dashboard"
+  docker compose -f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml" --env-file "$ENV_FILE" up -d
   step "Starting PostgreSQL"
   docker compose -f "$ROOT/services/postgres/docker-compose.yml" --env-file "$ENV_FILE" up -d
   step "Starting Redis"
@@ -278,21 +351,14 @@ docker_phase() {
     info "Monitoring skipped (set GRAFANA_HOST in .env and START_MONITORING=1 to enable)"
   fi
 
-  if [[ -f "$ROOT/services/portainer/docker-compose.yml" && "${START_PORTAINER:-1}" == "1" ]] && \
-     grep -q '^PORTAINER_HOST=' "$ENV_FILE"; then
+  if [[ -f "$ROOT/services/portainer/docker-compose.yml" ]]; then
     step "Starting Portainer"
     docker compose -f "$ROOT/services/portainer/docker-compose.yml" --env-file "$ENV_FILE" up -d
   else
-    info "Portainer skipped (set PORTAINER_HOST in .env and START_PORTAINER=1 to enable)"
+    echo "Missing required compose file: $ROOT/services/portainer/docker-compose.yml"
+    exit 1
   fi
 
-  if [[ -f "$ROOT/apps/clay-erp/docker-compose.yml" && "${START_CLAY_ERP:-0}" == "1" ]]; then
-    step "Starting clay-erp"
-    docker compose -f "$ROOT/apps/clay-erp/docker-compose.yml" --env-file "$ENV_FILE" pull
-    docker compose -f "$ROOT/apps/clay-erp/docker-compose.yml" --env-file "$ENV_FILE" up -d
-  else
-    info "App stack skipped (START_CLAY_ERP=1 if needed)"
-  fi
 }
 
 # ---------- host phase: swap, SSH port, ufw, fail2ban, cron ----------
@@ -359,18 +425,18 @@ ROOTSCRIPT
 
   # Append SSH port to credentials file (create file if only SSH was configured)
   if [[ -f "$SSH_PORT_FILE" ]]; then
+    local saved_ssh_port
+    saved_ssh_port="$(tr -d ' \n' < "$SSH_PORT_FILE")"
     [[ -f "$CREDENTIALS_FILE" ]] || echo "# Setup $(date -Iseconds)" > "$CREDENTIALS_FILE"
     echo "" >> "$CREDENTIALS_FILE"
-    echo "SSH_PORT=$(cat "$SSH_PORT_FILE")" >> "$CREDENTIALS_FILE"
-    echo "# ssh -p $(cat "$SSH_PORT_FILE") user@this-server" >> "$CREDENTIALS_FILE"
+    echo "SSH_PORT=${saved_ssh_port}" >> "$CREDENTIALS_FILE"
+    echo "# ssh -p ${saved_ssh_port} user@this-server" >> "$CREDENTIALS_FILE"
     chmod 600 "$CREDENTIALS_FILE"
-  fi
-  # Also store in .env for operators
-  if [[ -f "$SSH_PORT_FILE" ]]; then
+    # Also store in .env for operators
     if grep -q '^SSH_PORT=' "$ENV_FILE" 2>/dev/null; then
-      sed_inplace "s|^SSH_PORT=.*|SSH_PORT=$(cat "$SSH_PORT_FILE")|" "$ENV_FILE"
+      sed_inplace "s|^SSH_PORT=.*|SSH_PORT=${saved_ssh_port}|" "$ENV_FILE"
     else
-      echo "SSH_PORT=$(cat "$SSH_PORT_FILE")" >> "$ENV_FILE"
+      echo "SSH_PORT=${saved_ssh_port}" >> "$ENV_FILE"
     fi
   fi
 }
@@ -414,16 +480,49 @@ print_credentials_banner() {
   echo ""
 }
 
+print_success_summary() {
+  load_env
+
+  local ssh_port="<unknown>"
+  if [[ -f "$SSH_PORT_FILE" ]]; then
+    ssh_port="$(tr -d ' \n' < "$SSH_PORT_FILE")"
+  elif [[ -n "${SSH_PORT:-}" ]]; then
+    ssh_port="$SSH_PORT"
+  fi
+
+  echo -e "${GREEN}==>${NC} ${BOLD}Setup completed successfully${NC}"
+  echo ""
+  echo -e "${BOLD}Access endpoints${NC}"
+  echo "  Traefik Dashboard : https://${TRAEFIK_DASHBOARD_HOST:-<not-set>}"
+  echo "  Portainer         : https://${PORTAINER_HOST:-<not-set>}"
+  echo "  Grafana           : https://${GRAFANA_HOST:-<not-set>}"
+  echo "  MinIO Console     : https://${MINIO_CONSOLE_HOST:-<not-set>}"
+  echo "  MinIO API         : https://${MINIO_API_HOST:-<not-set>}"
+  echo ""
+  echo -e "${BOLD}Operations${NC}"
+  echo "  SSH Port          : ${ssh_port}"
+  echo "  Stack Command     : ${STACKCTL_BIN_NAME}"
+  echo "  Env File          : ${ENV_FILE}"
+  echo "  Credentials File  : ${CREDENTIALS_FILE}"
+  echo "  Audit Log         : ${ROOT}/logs/stackctl.log"
+  echo "  Backups           : ${OPT_BASE}/backups/postgres"
+  echo ""
+  echo -e "${BOLD}Quick commands${NC}"
+  echo "  ${STACKCTL_BIN_NAME} status"
+  echo "  ${STACKCTL_BIN_NAME} health all"
+  echo "  ${STACKCTL_BIN_NAME} credentials all"
+  echo "  ${STACKCTL_BIN_NAME} menu"
+  echo ""
+}
+
 # ---------- main ----------
 echo -e "${BOLD}VPS stack setup${NC} (${ROOT})"
 preflight
 ensure_env
+enforce_base_domain_hosts
 generate_secrets
 docker_phase
 host_phase
 install_stackctl_bin
 print_credentials_banner
-
-step "Finished"
-info "Data: $OPT_BASE/volumes  |  Backups: $OPT_BASE/backups/postgres"
-info "Restore drill: $ROOT/scripts/restore-drill.sh"
+print_success_summary

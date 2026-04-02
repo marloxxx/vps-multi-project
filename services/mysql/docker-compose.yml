@@ -8,7 +8,9 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-app}
+      # Optional: set MYSQL_DATABASE to create one initial DB.
+      # If empty, no default DB is created (recommended for isolated per-project DB provisioning).
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-}
     volumes:
       - mysql_data:/var/lib/mysql
     networks:

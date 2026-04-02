@@ -203,7 +203,7 @@ psql_shell() {
   # shellcheck source=/dev/null
   source "$ENV_FILE"
   set +a
-  local db="${1:-$POSTGRES_DB}"
+  local db="${1:-${POSTGRES_DB:-postgres}}"
   docker exec -it postgres psql -U "$POSTGRES_USER" -d "$db"
 }
 
@@ -398,7 +398,8 @@ check_service_health() {
       # shellcheck source=/dev/null
       source "$ENV_FILE"
       set +a
-      if docker exec postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
+      local pg_db="${POSTGRES_DB:-postgres}"
+      if docker exec postgres pg_isready -U "$POSTGRES_USER" -d "$pg_db" >/dev/null 2>&1; then
         echo "OK   postgres accepts connections"
       else
         echo "FAIL postgres is running but not ready"
@@ -683,7 +684,7 @@ EOF
         restore_drill "$dump"
         ;;
       12)
-        read -r -p "Database name (empty = POSTGRES_DB): " db
+        read -r -p "Database name (empty = POSTGRES_DB or postgres): " db
         psql_shell "$db"
         ;;
       13)

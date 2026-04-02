@@ -14,17 +14,20 @@ chmod +x setup.sh && ./setup.sh
 **Interactive:** prompts for **base domain** and **ACME email** if `.env` is missing.
 
 **Automatic:** random passwords for Postgres, MySQL, Redis, MinIO (and Grafana if monitoring is on), plus a detailed service credential summary, written to **`.env`** and **`.setup-credentials.txt`**. A **banner at the end** prints the same – **copy to a password manager, then delete** `.setup-credentials.txt`.
+Setup also generates Traefik dashboard basic-auth credentials if needed.
 
 **SSH** moves to a **random port (20000–40000)**; `ufw` allows that port plus 80/443 (and 22 until you migrate). Port is in **`.ssh-port`** and in the credentials output.
 
 **CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
-**Docker auto-install (optional):** `AUTO_INSTALL_DOCKER=1 ./setup.sh` (default is off).
+**Docker auto-install:** enabled by default (`AUTO_INSTALL_DOCKER=1`).  
+**Portainer + Traefik dashboard:** required and started during setup.
+**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `storage.<base>`, `s3.<base>`).
 
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
 **Skip monitoring:** `START_MONITORING=0 ./setup.sh`  
-**Skip Portainer:** `START_PORTAINER=0 ./setup.sh`  
 **Custom CLI name:** `STACKCTL_BIN_NAME=vpsctl ./setup.sh`  
+**Disable host sync (advanced):** `SYNC_HOSTS_WITH_BASE_DOMAIN=0 ./setup.sh`
 **Re-run secrets only:** `REGENERATE_SECRETS=1 ./setup.sh` (overwrites password lines in `.env`).
 
 ## Layout & docs
@@ -33,7 +36,7 @@ chmod +x setup.sh && ./setup.sh
 |------------|--------|
 | `docs/TRAEFIK.md` | Multi-host, TLS |
 | `docs/POSTGRES.md` | Backups, multi-DB |
-| `docs/TOOLS.md` | Portainer, Grafana |
+| `docs/TOOLS.md` | Operational tools |
 | `docs/SUGGESTIONS.md` | Hardening |
 | `DEPLOY.md` | SSH keys, firewall, console recovery |
 
@@ -66,7 +69,7 @@ stackctl menu
 Service groups:
 
 - `core`: `traefik postgres redis minio mysql`
-- `all`: `traefik postgres redis minio mysql monitoring portainer`
+- `all`: `traefik postgres redis minio monitoring mysql portainer`
 
 Common commands:
 

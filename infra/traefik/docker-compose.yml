@@ -20,7 +20,7 @@ services:
       - ./acme.json:/letsencrypt/acme.json
     networks:
       - proxy
-    # Optional: expose dashboard via HTTPS – see docker-compose.dashboard.yml
+    # Dashboard is enabled via docker-compose.dashboard.yml in setup.sh
 
 networks:
   proxy:

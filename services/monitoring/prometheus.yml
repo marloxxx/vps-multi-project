@@ -1,4 +1,5 @@
 # Scrape configs – cAdvisor = container metrics; Prometheus self-monitoring
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -11,9 +12,3 @@ scrape_configs:
   - job_name: cadvisor
     static_configs:
       - targets: ["cadvisor:8080"]
-
-  # Optional: add your app metrics endpoint
-  # - job_name: clay-api
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["clay-api:3001"]

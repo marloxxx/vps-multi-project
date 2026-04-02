@@ -9,7 +9,7 @@ cd /opt/stack
 chmod +x setup.sh && ./setup.sh
 ```
 
-`setup.sh` creates `.env` (domain + ACME email), generates random passwords, starts stacks + monitoring by default, then configures **SSH on a random high port**, **ufw** (new port + 80 + 443 + 22 until you migrate), fail2ban, cron.
+`setup.sh` creates `.env` (domain + ACME email), generates random passwords, starts stack services (Traefik dashboard + Portainer included, monitoring enabled by default), then configures **SSH on a random high port**, **ufw** (new port + 80 + 443 + 22 until you migrate), fail2ban, cron.
 
 **Credentials** are printed at the end and saved to `.setup-credentials.txt` (mode 600). **Copy then delete** that file. SSH port is also in `.ssh-port` and appended to `.env` as `SSH_PORT=`.
 
