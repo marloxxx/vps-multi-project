@@ -33,6 +33,7 @@ CREDENTIALS_FILE="$ROOT/.setup-credentials.txt"
 SSH_PORT_FILE="$ROOT/.ssh-port"
 STACKCTL_BIN_NAME="${STACKCTL_BIN_NAME:-stackctl}"
 AUTO_INSTALL_STACKCTL="${AUTO_INSTALL_STACKCTL:-1}"
+AUTO_INSTALL_DOCKER="${AUTO_INSTALL_DOCKER:-0}"
 
 # ---------- portable sed in-place ----------
 sed_inplace() {
@@ -125,15 +126,67 @@ generate_secrets() {
 }
 
 # ---------- preflight ----------
+run_priv() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+install_docker_if_missing() {
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$AUTO_INSTALL_DOCKER" != "1" ]]; then
+    echo "Docker not available. Install and start Docker then re-run."
+    echo "Tip: run with AUTO_INSTALL_DOCKER=1 to auto-install Docker."
+    exit 1
+  fi
+
+  step "Docker not found – installing (AUTO_INSTALL_DOCKER=1)"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    local os_id codename arch
+    os_id="$(. /etc/os-release && echo "${ID:-ubuntu}")"
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
+    arch="$(dpkg --print-architecture)"
+    if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
+      codename="$(lsb_release -cs)"
+    fi
+    [[ -n "$codename" ]] || { echo "Cannot detect distro codename for Docker repo."; exit 1; }
+
+    run_priv apt-get update -qq
+    run_priv apt-get install -y ca-certificates curl gnupg lsb-release
+    run_priv install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/${os_id}/gpg" | run_priv gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    run_priv chmod a+r /etc/apt/keyrings/docker.gpg
+    printf '%s\n' "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${os_id} ${codename} stable" | run_priv tee /etc/apt/sources.list.d/docker.list >/dev/null
+    run_priv apt-get update -qq
+    run_priv apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    run_priv systemctl enable --now docker || run_priv service docker start || true
+  elif command -v dnf >/dev/null 2>&1; then
+    run_priv dnf install -y docker docker-compose-plugin
+    run_priv systemctl enable --now docker || true
+  elif command -v yum >/dev/null 2>&1; then
+    run_priv yum install -y docker docker-compose-plugin
+    run_priv systemctl enable --now docker || run_priv service docker start || true
+  else
+    echo "Unsupported distro for auto-install. Install Docker manually and re-run."
+    exit 1
+  fi
+
+  docker info >/dev/null 2>&1 || { echo "Docker install completed but daemon is not ready."; exit 1; }
+  step "Docker is installed and running"
+}
+
 preflight() {
   if [[ "$ROOT" != "$STACK_ROOT" && "${SKIP_OPT_CHECK:-0}" != "1" ]]; then
     echo "Run from $STACK_ROOT (clone repo there first)."
     exit 1
   fi
-  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-    echo "Docker not available. Install and start Docker then re-run."
-    exit 1
-  fi
+  install_docker_if_missing
 }
 
 # ---------- docker phase ----------

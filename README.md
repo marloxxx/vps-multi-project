@@ -18,6 +18,7 @@ chmod +x setup.sh && ./setup.sh
 **SSH** moves to a **random port (20000–40000)**; `ufw` allows that port plus 80/443 (and 22 until you migrate). Port is in **`.ssh-port`** and in the credentials output.
 
 **CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
+**Docker auto-install (optional):** `AUTO_INSTALL_DOCKER=1 ./setup.sh` (default is off).
 
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
