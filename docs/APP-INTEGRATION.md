@@ -126,6 +126,13 @@ cd /opt/stack
 
 Then point your app’s `.env` at **`postgres`** or **`mysql`**, with the generated **database name, user, and password**.
 
+To tear down a project database later (drops `<project>_db` and `<project>_app`, and removes matching credential blocks from `.project-db-credentials.txt`):
+
+```bash
+./scripts/stack-manage.sh drop-db postgres my_project
+./scripts/stack-manage.sh drop-db mysql my_project --yes
+```
+
 See **`docs/POSTGRES.md`** for backups and restores.
 
 ---

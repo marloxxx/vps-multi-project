@@ -97,6 +97,13 @@ stackctl provision-db mysql my_project
 stackctl provision-db postgres my_project
 ```
 
+Remove a provisioned project database and app user (prompts for `yes` unless `--yes`):
+
+```bash
+stackctl drop-db mysql my_project
+stackctl drop-db postgres my_project --yes
+```
+
 Generated project credentials are appended to:
 
 ```bash

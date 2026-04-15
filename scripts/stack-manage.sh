@@ -600,6 +600,159 @@ provision_project_db() {
   esac
 }
 
+remove_project_credentials() {
+  local engine="$1"
+  local project="$2"
+  local f="$PROJECT_CREDS_FILE"
+  [[ -f "$f" ]] || return 0
+  local tmp block e p line
+  tmp="$(mktemp)"
+  block=""
+  e=""
+  p=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ -z "$line" ]]; then
+      if [[ -n "$block" ]]; then
+        if [[ "$e" == "$engine" && "$p" == "$project" ]]; then
+          :
+        else
+          block="${block%$'\n'}"
+          printf '%s\n\n' "$block" >> "$tmp"
+        fi
+        block=""
+        e=""
+        p=""
+      fi
+      continue
+    fi
+    block+="$line"$'\n'
+    [[ "$line" == ENGINE=* ]] && e="${line#ENGINE=}"
+    [[ "$line" == PROJECT=* ]] && p="${line#PROJECT=}"
+  done
+  if [[ -n "$block" ]]; then
+    if [[ "$e" == "$engine" && "$p" == "$project" ]]; then
+      :
+    else
+      block="${block%$'\n'}"
+      printf '%s\n' "$block" >> "$tmp"
+    fi
+  fi
+  mv "$tmp" "$f"
+  chmod 600 "$f" 2>/dev/null || true
+}
+
+confirm_drop_project_db() {
+  local force="${1:-0}"
+  [[ "$force" == "1" ]] && return 0
+  local reply
+  read -r -p "Type 'yes' to permanently drop this database and user: " reply
+  [[ "$reply" == "yes" ]] || {
+    echo "Aborted."
+    return 1
+  }
+}
+
+drop_mysql_project() {
+  local raw_project="${1:-}"
+  local force_confirm="${2:-0}"
+  [[ -n "$raw_project" ]] || {
+    echo "Usage: stackctl drop-mysql <project-name> [--yes]"
+    return 1
+  }
+  audit_log "drop-mysql project=$raw_project"
+
+  local project db_name db_user user_host
+  project="$(normalise_project_name "$raw_project")"
+  db_name="${project}_db"
+  db_user="${project}_app"
+  user_host="${PROJECT_DB_USER_HOST:-%}"
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  [[ -n "${MYSQL_ROOT_PASSWORD:-}" ]] || {
+    echo "MYSQL_ROOT_PASSWORD is not set in $ENV_FILE"
+    return 1
+  }
+  is_running mysql || {
+    echo "MySQL container is not running."
+    echo "Start it with: stackctl start mysql"
+    return 1
+  }
+
+  echo "MySQL: will DROP DATABASE \`$db_name\` and DROP USER '$db_user'@'$user_host'."
+  confirm_drop_project_db "$force_confirm" || return 1
+
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "DROP DATABASE IF EXISTS \`$db_name\`;"
+  docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql mysql -uroot -e "DROP USER IF EXISTS '$db_user'@'$user_host'; FLUSH PRIVILEGES;"
+
+  remove_project_credentials "mysql" "$project"
+
+  echo "MySQL project database removed:"
+  echo "  PROJECT=$project"
+  echo "  DB_NAME=$db_name (dropped)"
+  echo "  DB_USER=$db_user (dropped)"
+  echo "Updated: $PROJECT_CREDS_FILE (matching credential blocks removed)"
+}
+
+drop_postgres_project() {
+  local raw_project="${1:-}"
+  local force_confirm="${2:-0}"
+  [[ -n "$raw_project" ]] || {
+    echo "Usage: stackctl drop-postgres <project-name> [--yes]"
+    return 1
+  }
+  audit_log "drop-postgres project=$raw_project"
+
+  local project db_name db_user
+  project="$(normalise_project_name "$raw_project")"
+  db_name="${project}_db"
+  db_user="${project}_app"
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+
+  is_running postgres || {
+    echo "PostgreSQL container is not running."
+    echo "Start it with: stackctl start postgres"
+    return 1
+  }
+
+  echo "PostgreSQL: will DROP DATABASE \"$db_name\" (WITH FORCE) and DROP ROLE \"$db_user\"."
+  confirm_drop_project_db "$force_confirm" || return 1
+
+  docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$db_name\" WITH (FORCE);"
+  docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS \"$db_user\";"
+
+  remove_project_credentials "postgres" "$project"
+
+  echo "PostgreSQL project database removed:"
+  echo "  PROJECT=$project"
+  echo "  DB_NAME=$db_name (dropped)"
+  echo "  DB_USER=$db_user (dropped)"
+  echo "Updated: $PROJECT_CREDS_FILE (matching credential blocks removed)"
+}
+
+drop_project_db() {
+  local engine="${1:-}"
+  local raw_project="${2:-}"
+  local force_confirm=0
+  [[ "${3:-}" == "--yes" ]] && force_confirm=1
+  case "$engine" in
+    mysql) drop_mysql_project "$raw_project" "$force_confirm" ;;
+    postgres|pgsql|postgresql) drop_postgres_project "$raw_project" "$force_confirm" ;;
+    *)
+      echo "Usage: stackctl drop-db <mysql|postgres> <project-name> [--yes]"
+      return 1
+      ;;
+  esac
+}
+
 print_help() {
   cat <<'EOF'
 Usage:
@@ -622,6 +775,9 @@ Commands:
   provision-mysql <project>    Create isolated mysql db/user/password
   provision-postgres <project> Create isolated postgres db/user/password
   provision-db <engine> <name> Create isolated db/user/password
+  drop-mysql <project> [--yes]  Drop mysql db/user (see drop-db)
+  drop-postgres <project> [--yes] Drop postgres db/role (see drop-db)
+  drop-db <engine> <name> [--yes] Drop project db/user (removes creds blocks)
   credentials [service|all]    Show credentials from .env
   open-db-port [db] [ip]       Open DB firewall port (db: postgres|mysql)
   close-db-port [db] [ip]      Close DB firewall port (db: postgres|mysql)
@@ -637,6 +793,7 @@ Examples:
   ./scripts/stack-manage.sh mysql app
   ./scripts/stack-manage.sh provision-db mysql billing
   ./scripts/stack-manage.sh provision-db postgres clay_erp
+  ./scripts/stack-manage.sh drop-db postgres clay_erp --yes
   ./scripts/stack-manage.sh credentials postgres
   ./scripts/stack-manage.sh open-db-port postgres 203.0.113.10
   ./scripts/stack-manage.sh install-bin stackctl
@@ -663,8 +820,10 @@ Stack Management Menu
 13) Open mysql shell
 14) Provision MySQL project DB
 15) Provision PostgreSQL project DB
-16) Show credentials
-17) Install /usr/bin command
+16) Drop MySQL project DB
+17) Drop PostgreSQL project DB
+18) Show credentials
+19) Install /usr/bin command
 0) Exit
 EOF
     read -r -p "Choose: " choice
@@ -712,10 +871,18 @@ EOF
         provision_postgres_project "$project"
         ;;
       16)
+        read -r -p "Project name: " project
+        drop_mysql_project "$project" 0
+        ;;
+      17)
+        read -r -p "Project name: " project
+        drop_postgres_project "$project" 0
+        ;;
+      18)
         read -r -p "Target (all/postgres/redis/minio/monitoring/mysql/portainer) [all]: " target
         show_credentials "${target:-all}"
         ;;
-      17)
+      19)
         read -r -p "Command name (default stackctl): " name
         install_bin "${name:-stackctl}"
         ;;
@@ -742,6 +909,17 @@ case "$cmd" in
   provision-mysql) provision_mysql_project "${2:-}" ;;
   provision-postgres) provision_postgres_project "${2:-}" ;;
   provision-db) provision_project_db "${2:-}" "${3:-}" ;;
+  drop-mysql)
+    force_drop=0
+    [[ "${3:-}" == "--yes" ]] && force_drop=1
+    drop_mysql_project "${2:-}" "$force_drop"
+    ;;
+  drop-postgres)
+    force_drop=0
+    [[ "${3:-}" == "--yes" ]] && force_drop=1
+    drop_postgres_project "${2:-}" "$force_drop"
+    ;;
+  drop-db) drop_project_db "${2:-}" "${3:-}" "${4:-}" ;;
   credentials) show_credentials "${2:-all}" ;;
   open-db-port) open_db_port "${2:-postgres}" "${3:-}" ;;
   close-db-port) close_db_port "${2:-postgres}" "${3:-}" ;;
