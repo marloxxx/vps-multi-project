@@ -109,6 +109,57 @@ ensure_env() {
   echo ""
 }
 
+# ---------- optional stacks: asked at install (or env / .env) ----------
+prompt_stack_options() {
+  [[ -f "$ENV_FILE" ]] || return 0
+
+  local need_banner=0
+  grep -qE '^START_MINIO=' "$ENV_FILE" || need_banner=1
+  grep -qE '^START_MONITORING=' "$ENV_FILE" || need_banner=1
+  if [[ "$need_banner" -eq 1 ]]; then
+    echo ""
+    echo -e "${BOLD}Optional services${NC}"
+    echo "Choose whether to run MinIO and the monitoring stack (Prometheus + Grafana)."
+    echo "Non-interactive: set START_MINIO and START_MONITORING (0 or 1) in the environment or in .env before setup."
+    echo ""
+  fi
+
+  local ans
+  if ! grep -qE '^START_MINIO=' "$ENV_FILE"; then
+    if [[ -n "${START_MINIO:-}" ]]; then
+      set_or_append_env START_MINIO "$START_MINIO"
+    elif [[ -t 0 ]]; then
+      read -r -p "Install MinIO (S3-compatible storage)? [Y/n] " ans
+      if [[ "${ans:-Y}" =~ ^[Nn] ]]; then
+        set_or_append_env START_MINIO "0"
+      else
+        set_or_append_env START_MINIO "1"
+      fi
+    else
+      set_or_append_env START_MINIO "${START_MINIO:-1}"
+    fi
+  fi
+
+  if ! grep -qE '^START_MONITORING=' "$ENV_FILE"; then
+    if [[ -n "${START_MONITORING:-}" ]]; then
+      set_or_append_env START_MONITORING "$START_MONITORING"
+    elif [[ -t 0 ]]; then
+      read -r -p "Install monitoring (Prometheus + Grafana)? [Y/n] " ans
+      if [[ "${ans:-Y}" =~ ^[Nn] ]]; then
+        set_or_append_env START_MONITORING "0"
+      else
+        set_or_append_env START_MONITORING "1"
+      fi
+    else
+      set_or_append_env START_MONITORING "${START_MONITORING:-1}"
+    fi
+  fi
+
+  if [[ "$need_banner" -eq 1 ]]; then
+    echo ""
+  fi
+}
+
 # ---------- enforce hostnames from BASE_DOMAIN ----------
 enforce_base_domain_hosts() {
   load_env
@@ -127,9 +178,20 @@ enforce_base_domain_hosts() {
   step "Aligning service hosts to BASE_DOMAIN (${base_domain})"
   set_or_append_env TRAEFIK_DASHBOARD_HOST "traefik.${base_domain}"
   set_or_append_env PORTAINER_HOST "portainer.${base_domain}"
-  set_or_append_env GRAFANA_HOST "grafana.${base_domain}"
-  set_or_append_env MINIO_CONSOLE_HOST "storage.${base_domain}"
-  set_or_append_env MINIO_API_HOST "s3.${base_domain}"
+
+  if [[ "${START_MONITORING:-1}" == "1" ]]; then
+    set_or_append_env GRAFANA_HOST "grafana.${base_domain}"
+  else
+    sed_inplace '/^GRAFANA_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+  fi
+
+  if [[ "${START_MINIO:-1}" == "1" ]]; then
+    set_or_append_env MINIO_CONSOLE_HOST "storage.${base_domain}"
+    set_or_append_env MINIO_API_HOST "s3.${base_domain}"
+  else
+    sed_inplace '/^MINIO_CONSOLE_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+    sed_inplace '/^MINIO_API_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+  fi
 }
 
 # ---------- generate secrets into .env + stash for final print ----------
@@ -334,8 +396,9 @@ docker_phase() {
     chmod 600 "$acme" 2>/dev/null || true
   fi
 
-  mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$MINIO_DATA_DIR" "$BACKUP_DIR" \
-    "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR" "$PORTAINER_DATA_DIR" "$MYSQL_DATA_DIR"
+  mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$BACKUP_DIR" "$PORTAINER_DATA_DIR" "$MYSQL_DATA_DIR"
+  [[ "${START_MINIO:-1}" == "1" ]] && mkdir -p "$MINIO_DATA_DIR"
+  [[ "${START_MONITORING:-1}" == "1" ]] && mkdir -p "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR"
 
   step "Starting Traefik + dashboard"
   docker compose -f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml" --env-file "$ENV_FILE" up -d
@@ -343,15 +406,24 @@ docker_phase() {
   docker compose -f "$ROOT/services/postgres/docker-compose.yml" --env-file "$ENV_FILE" up -d
   step "Starting Redis"
   docker compose -f "$ROOT/services/redis/docker-compose.yml" --env-file "$ENV_FILE" up -d
-  step "Starting MinIO"
-  docker compose -f "$ROOT/services/minio/docker-compose.yml" --env-file "$ENV_FILE" up -d
+
+  if [[ "${START_MINIO:-1}" == "1" ]]; then
+    step "Starting MinIO"
+    docker compose -f "$ROOT/services/minio/docker-compose.yml" --env-file "$ENV_FILE" up -d
+  else
+    info "MinIO skipped (START_MINIO=0)"
+  fi
 
   if [[ -f "$ROOT/services/monitoring/docker-compose.yml" && "${START_MONITORING:-1}" == "1" ]] && \
      grep -q '^GRAFANA_HOST=' "$ENV_FILE"; then
     step "Starting monitoring (Prometheus + Grafana + cAdvisor)"
     docker compose -f "$ROOT/services/monitoring/docker-compose.yml" --env-file "$ENV_FILE" up -d
   else
-    info "Monitoring skipped (set GRAFANA_HOST in .env and START_MONITORING=1 to enable)"
+    if [[ "${START_MONITORING:-1}" != "1" ]]; then
+      info "Monitoring skipped (START_MONITORING=0)"
+    else
+      info "Monitoring skipped (set GRAFANA_HOST in .env and START_MONITORING=1 to enable)"
+    fi
   fi
 
   if [[ -f "$ROOT/services/portainer/docker-compose.yml" ]]; then
@@ -522,6 +594,7 @@ print_success_summary() {
 echo -e "${BOLD}VPS stack setup${NC} (${ROOT})"
 preflight
 ensure_env
+prompt_stack_options
 enforce_base_domain_hosts
 generate_secrets
 docker_phase
