@@ -69,8 +69,10 @@ stackctl menu
 
 Service groups:
 
-- `core`: `traefik postgres redis minio mysql`
-- `all`: `traefik postgres redis minio monitoring mysql portainer`
+- `core`: `traefik postgres redis minio mysql` — **MinIO** is started only when it is considered configured (see below); otherwise `stackctl start core` skips it.
+- `all`: `traefik postgres redis minio monitoring mysql portainer` — same MinIO rule as `core`.
+
+**MinIO and `stackctl`:** with `START_MINIO=0` (or `false` / `no` / `off`), MinIO is never part of `core` / `all`. With `START_MINIO=1` (or `true` / `yes` / `on`), it is always included when the compose file exists. If `START_MINIO` is unset, MinIO is included only when `MINIO_API_HOST`, `MINIO_CONSOLE_HOST`, `MINIO_ROOT_USER`, and `MINIO_ROOT_PASSWORD` are all non-empty. To start MinIO regardless: `stackctl start minio`.
 
 Common commands:
 

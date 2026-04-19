@@ -144,8 +144,8 @@ minio_included_in_automated_groups() {
   flag="$(printf '%s' "${START_MINIO-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 
   case "$flag" in
-    0 | false | no | off) return 1 ;;
-    1 | true | yes | on) return 0 ;;
+    0|false|no|off) return 1 ;;
+    1|true|yes|on) return 0 ;;
   esac
 
   local api console user pass
@@ -874,6 +874,7 @@ Commands:
   stop [core|all|service]      Stop stack/service (default: core)
   restart [core|all|service]   Restart stack/service (default: core)
   health [core|all|service]    Run basic health checks
+  MinIO (core/all only): START_MINIO=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if MINIO_API_HOST, MINIO_CONSOLE_HOST, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD are all set. Else: stackctl start minio
   logs <service>               Follow logs for a service
   backup                       Backup default database
   backup-all                   Backup all databases
