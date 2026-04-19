@@ -1,10 +1,9 @@
 # Traefik static configuration (Docker provider via compose labels; optional file provider)
 # Docs: https://doc.traefik.io/traefik/
 #
-# Layered Traefik (edge A → this instance B): keep public :80 → :443 redirect on `web`, but
-# never send upstream checks from A to B on `web` with only the backend IP — that hits this
-# redirect and becomes HTTPS to an IP (TLS name mismatch). Use entrypoint `internal` (:8080)
-# from A instead, and add `internal` to the same routers as `websecure` (preserve Host header).
+# Layered Traefik (edge A → this instance B): `web` (:80) is plain HTTP (no forced HTTPS redirect).
+# HTTPS remains on `websecure` (:443) for routers that use TLS. For east-west checks without TLS,
+# use entrypoint `internal` (:8080) if you publish it only on the VPC interface.
 
 api:
   dashboard: true
@@ -18,12 +17,6 @@ ping:
 entryPoints:
   web:
     address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-          permanent: true
   websecure:
     address: ":443"
   # Plain HTTP for private / east-west only (no redirect). Publish 8080 only on the VPC interface.
