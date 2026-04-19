@@ -21,6 +21,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
+      # For layered Traefik (edge → this node on HTTP): use websecure,internal and upstream http://<ip>:8080; preserve Host.
       - "traefik.http.routers.portainer.entrypoints=websecure"
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9000"

@@ -14,6 +14,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # East-west from another Traefik: use http://<backend-ip>:8080 (see traefik.yml entryPoints.internal)
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
