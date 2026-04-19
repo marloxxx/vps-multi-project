@@ -10,6 +10,11 @@ api:
   dashboard: true
   insecure: false
 
+# Liveness for upstream checks: GET /ping is served on this entrypoint only (not on web/websecure).
+# Matches :8080 entrypoint `internal` (see header comment).
+ping:
+  entryPoint: internal
+
 entryPoints:
   web:
     address: ":80"

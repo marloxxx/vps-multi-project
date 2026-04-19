@@ -115,6 +115,77 @@ prepare_mysql_data_dir() {
   mkdir -p "$dir"
 }
 
+# Bind-mounted MinIO data: Docker does not create the host path for driver local + bind.
+prepare_minio_data_dir() {
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+  local dir="${MINIO_DATA_DIR:-/opt/volumes/minio}"
+  mkdir -p "$dir"
+}
+
+# Whether MinIO participates in `core` / `all` (start, stop, restart, health, credentials all).
+# Explicit START_MINIO=0|false|no|off → never auto-include.
+# Explicit START_MINIO=1|true|yes|on → always auto-include (compose file must exist).
+# Otherwise → auto: include only if compose exists and API host, console host, root user, and root password are all non-empty (whitespace-stripped).
+# Explicit `stackctl start minio` / `stop minio` is always honoured regardless of this.
+minio_included_in_automated_groups() {
+  local minio_compose
+  minio_compose="$(service_compose_file minio)" || return 1
+  [[ -f "$minio_compose" ]] || return 1
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE" 2>/dev/null || return 1
+  set +a
+
+  local flag
+  flag="$(printf '%s' "${START_MINIO-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+  case "$flag" in
+    0 | false | no | off) return 1 ;;
+    1 | true | yes | on) return 0 ;;
+  esac
+
+  local api console user pass
+  api="$(printf '%s' "${MINIO_API_HOST-}" | tr -d '[:space:]')"
+  console="$(printf '%s' "${MINIO_CONSOLE_HOST-}" | tr -d '[:space:]')"
+  user="$(printf '%s' "${MINIO_ROOT_USER-}" | tr -d '[:space:]')"
+  pass="$(printf '%s' "${MINIO_ROOT_PASSWORD-}" | tr -d '[:space:]')"
+  [[ -n "$api" && -n "$console" && -n "$user" && -n "$pass" ]]
+}
+
+strip_service_from_list() {
+  local list="$1"
+  local drop="$2"
+  local out="" w
+  for w in $list; do
+    [[ "$w" == "$drop" ]] && continue
+    out="${out:+$out }$w"
+  done
+  printf '%s' "$out"
+}
+
+# Echoes the service list for `core` or `all` with MinIO removed when not included by policy.
+resolve_stack_group() {
+  local group_name="${1:-}"
+  local base=""
+  case "$group_name" in
+    core) base="$CORE_LIST" ;;
+    all) base="$SERVICE_LIST" ;;
+    *)
+      printf '%s' "$group_name"
+      return
+      ;;
+  esac
+  if minio_included_in_automated_groups; then
+    printf '%s' "$base"
+    return
+  fi
+  strip_service_from_list "$base" minio
+}
+
 compose_run() {
   local service="$1"
   shift
@@ -132,6 +203,7 @@ run_on_group() {
     echo "==> $action $item"
     if [[ "$action" == "up" ]]; then
       [[ "$item" != "mysql" ]] || prepare_mysql_data_dir
+      [[ "$item" != "minio" ]] || prepare_minio_data_dir
       compose_run "$item" "$action" -d
     else
       compose_run "$item" "$action"
@@ -154,12 +226,29 @@ start_service() {
   local target="${1:-core}"
   audit_log "start target=$target"
   case "$target" in
-    all) run_on_group up "$SERVICE_LIST" ;;
-    core) run_on_group up "$CORE_LIST" ;;
+    all)
+      local eff_all
+      eff_all="$(resolve_stack_group all)"
+      if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
+        echo "Note: MinIO omitted from 'all' (START_MINIO=0 or incomplete MINIO_* in $ENV_FILE). Use: stackctl start minio"
+        audit_log "start all minio=skipped_by_policy"
+      fi
+      run_on_group up "$eff_all"
+      ;;
+    core)
+      local eff_core
+      eff_core="$(resolve_stack_group core)"
+      if [[ "$eff_core" != "$CORE_LIST" ]]; then
+        echo "Note: MinIO omitted from 'core' (START_MINIO=0 or incomplete MINIO_* in $ENV_FILE). Use: stackctl start minio"
+        audit_log "start core minio=skipped_by_policy"
+      fi
+      run_on_group up "$eff_core"
+      ;;
     *)
       require_compose_file "$target"
       echo "==> starting $target"
       [[ "$target" != "mysql" ]] || prepare_mysql_data_dir
+      [[ "$target" != "minio" ]] || prepare_minio_data_dir
       compose_run "$target" up -d
       ;;
   esac
@@ -169,8 +258,22 @@ stop_service() {
   local target="${1:-core}"
   audit_log "stop target=$target"
   case "$target" in
-    all) run_on_group down "$SERVICE_LIST" ;;
-    core) run_on_group down "$CORE_LIST" ;;
+    all)
+      local eff_all
+      eff_all="$(resolve_stack_group all)"
+      if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
+        audit_log "stop all minio=skipped_by_policy"
+      fi
+      run_on_group down "$eff_all"
+      ;;
+    core)
+      local eff_core
+      eff_core="$(resolve_stack_group core)"
+      if [[ "$eff_core" != "$CORE_LIST" ]]; then
+        audit_log "stop core minio=skipped_by_policy"
+      fi
+      run_on_group down "$eff_core"
+      ;;
     *)
       require_compose_file "$target"
       echo "==> stopping $target"
@@ -273,8 +376,13 @@ show_credentials() {
       echo ""
       show_credentials redis
       echo ""
-      show_credentials minio
-      echo ""
+      if minio_included_in_automated_groups; then
+        show_credentials minio
+        echo ""
+      else
+        echo "[minio] (skipped — not enabled for automated stack; set START_MINIO=1 or full MINIO_* in $ENV_FILE, or: stackctl credentials minio)"
+        echo ""
+      fi
       show_credentials monitoring
       echo ""
       show_credentials mysql
@@ -476,12 +584,12 @@ health_check() {
 
   case "$target" in
     all)
-      for svc in $SERVICE_LIST; do
+      for svc in $(resolve_stack_group all); do
         check_service_health "$svc"
       done
       ;;
     core)
-      for svc in $CORE_LIST; do
+      for svc in $(resolve_stack_group core); do
         check_service_health "$svc"
       done
       ;;
