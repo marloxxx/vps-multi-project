@@ -1,0 +1,21 @@
+# Optional overlay — keeps base traefik.yml + docker-compose.yml unchanged.
+# Enables Traefik's file provider via env (no static YAML edit) and bind-mounts app TLS material.
+#
+# Enable in root .env:
+#   TRAEFIK_LICENTRA_FILETLS=1
+#   LICENTRA_APP_ROOT=/opt/apps/licentra   # host path with ssl/ + traefik/dynamic/
+#
+# Manual up (match your -f list, e.g. with dashboard):
+#   docker compose -f docker-compose.yml -f docker-compose.dashboard.yml \
+#     -f docker-compose.licentra-filetls.yml --env-file ../../.env up -d
+#
+# In tls-certificates.yml use container paths: /certs/fullchain.pem, /certs/key.pem (or your filenames).
+
+services:
+  traefik:
+    environment:
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /etc/traefik/dynamic-licentra
+      TRAEFIK_PROVIDERS_FILE_WATCH: "true"
+    volumes:
+      - ${LICENTRA_APP_ROOT:-/opt/apps/licentra}/ssl:/certs:ro
+      - ${LICENTRA_APP_ROOT:-/opt/apps/licentra}/traefik/dynamic:/etc/traefik/dynamic-licentra:ro

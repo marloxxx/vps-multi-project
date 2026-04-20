@@ -53,3 +53,5 @@ cd /opt/stack
 docker compose -f infra/traefik/docker-compose.yml \
   -f infra/traefik/docker-compose.dashboard.yml --env-file .env up -d
 ```
+
+With **Licentra file TLS** (`TRAEFIK_LICENTRA_FILETLS=1` in `.env`), append `-f infra/traefik/docker-compose.licentra-filetls.yml` (same pattern as `setup.sh` / `stackctl`).

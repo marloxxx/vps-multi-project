@@ -1,5 +1,8 @@
 # Traefik reverse proxy – attach all public apps to network "proxy"
 # Load root .env from repo root: docker compose --env-file ../../.env up -d
+#
+# Optional Licentra (or other app) file TLS without editing this file: merge
+# docker-compose.licentra-filetls.yml (see header there + TRAEFIK_LICENTRA_FILETLS in .env for stackctl/setup).
 
 services:
   traefik:
