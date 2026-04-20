@@ -21,15 +21,18 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
+      # tls=true: explicit TLS on websecure; use with file-loaded certs when certresolver lines are removed.
       # S3 API
       - "traefik.http.routers.minio-api.rule=Host(`${MINIO_API_HOST}`)"
       - "traefik.http.routers.minio-api.entrypoints=websecure"
+      - "traefik.http.routers.minio-api.tls=true"
       - "traefik.http.routers.minio-api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.minio-api.service=minio-s3"
       - "traefik.http.services.minio-s3.loadbalancer.server.port=9000"
       # Console UI
       - "traefik.http.routers.minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)"
       - "traefik.http.routers.minio-console.entrypoints=websecure"
+      - "traefik.http.routers.minio-console.tls=true"
       - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
       - "traefik.http.routers.minio-console.service=minio-console-svc"
       - "traefik.http.services.minio-console-svc.loadbalancer.server.port=9001"
