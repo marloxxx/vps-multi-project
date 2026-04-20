@@ -1,4 +1,4 @@
-# Traefik static configuration (Docker provider via compose labels; optional file TLS via compose overlay + env — see docker-compose.licentra-filetls.yml).
+# Traefik static configuration (Docker provider via compose labels; TLS via Let’s Encrypt resolver below).
 # Docs: https://doc.traefik.io/traefik/
 #
 # Layered Traefik (edge A → this instance B): `web` (:80) is plain HTTP (no forced HTTPS redirect).

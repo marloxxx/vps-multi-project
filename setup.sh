@@ -401,13 +401,8 @@ docker_phase() {
   [[ "${START_MONITORING:-1}" == "1" ]] && mkdir -p "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR"
 
   step "Starting Traefik + dashboard"
-  local tf_files=(-f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml")
-  local tf_lic="$ROOT/infra/traefik/docker-compose.licentra-filetls.yml"
-  if [[ "${TRAEFIK_LICENTRA_FILETLS:-0}" =~ ^(1|true|yes|on)$ ]] && [[ -f "$tf_lic" ]]; then
-    tf_files+=(-f "$tf_lic")
-    info "Traefik: Licentra file TLS overlay enabled (TRAEFIK_LICENTRA_FILETLS)"
-  fi
-  docker compose "${tf_files[@]}" --env-file "$ENV_FILE" up -d
+  docker compose -f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml" \
+    --env-file "$ENV_FILE" up -d
   step "Starting PostgreSQL"
   docker compose -f "$ROOT/services/postgres/docker-compose.yml" --env-file "$ENV_FILE" up -d
   step "Starting Redis"

@@ -21,6 +21,21 @@ Let’s Encrypt **HTTP-01**: one cert per hostname when first requested. Each ho
 
 ---
 
+## TLS in this stack (Let’s Encrypt)
+
+1. **`/opt/stack/.env`:** `ACME_EMAIL` set (used by Traefik’s ACME resolver in `infra/traefik/traefik.yml`).
+2. **Traefik:** `docker-compose.yml` + `docker-compose.dashboard.yml` (same as `setup.sh` / `stackctl`).
+3. **App container:** **`proxy`** network; labels with `entrypoints=websecure` and **`tls.certresolver=letsencrypt`** (see block at top of this page).
+4. **DNS:** hostname → this server; **port 80** must reach Traefik for HTTP-01.
+
+First HTTPS request to that host triggers issuance (or reuse from `acme.json`).
+
+### Custom PEM certificates (advanced, not wired in repo)
+
+To terminate TLS with your own PEM files, extend **`infra/traefik/docker-compose.yml`** and **`traefik.yml`**: add bind mounts for certificates and a dynamic directory, enable Traefik’s **`providers.file`**, and supply `tls.certificates` YAML (shape: `infra/traefik/dynamic/tls-certificates.example.yml`). Routers using that cert must **not** set `tls.certresolver=letsencrypt` for the same host.
+
+---
+
 ## Wildcard subdomain (`*.example.com`)
 
 **HTTP-01 cannot issue wildcard certs.** Options:

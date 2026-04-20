@@ -191,17 +191,6 @@ compose_run() {
   shift
   local file
   file="$(service_compose_file "$service")"
-  if [[ "$service" == "traefik" ]]; then
-    local lic="$ROOT/infra/traefik/docker-compose.licentra-filetls.yml"
-    set -a
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
-    set +a
-    if [[ "${TRAEFIK_LICENTRA_FILETLS:-0}" =~ ^(1|true|yes|on)$ ]] && [[ -f "$lic" ]]; then
-      docker compose -f "$file" -f "$lic" --env-file "$ENV_FILE" "$@"
-      return
-    fi
-  fi
   docker compose -f "$file" --env-file "$ENV_FILE" "$@"
 }
 

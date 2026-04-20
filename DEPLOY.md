@@ -54,4 +54,4 @@ docker compose -f infra/traefik/docker-compose.yml \
   -f infra/traefik/docker-compose.dashboard.yml --env-file .env up -d
 ```
 
-With **Licentra file TLS** (`TRAEFIK_LICENTRA_FILETLS=1` in `.env`), append `-f infra/traefik/docker-compose.licentra-filetls.yml` (same pattern as `setup.sh` / `stackctl`).
+Public apps need **`traefik.http.routers.<name>.tls.certresolver=letsencrypt`** on `websecure` (see `docs/APP-INTEGRATION.md`). Port **80** must reach Traefik for HTTP-01.
