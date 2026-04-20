@@ -95,7 +95,30 @@ docker compose -f docker-compose.yml -f docker-compose.dashboard.yml \
   --env-file /opt/stack/.env up -d --force-recreate traefik
 ```
 
-**4.** Routers that must use this cert: **`websecure`** + correct **`Host(...)`**, and **no** **`tls.certresolver=letsencrypt`** for those hosts.
+**4. Labels on your app service** — attach the container to **`proxy`**, then use **`websecure`** and a **`Host(...)`** rule that matches a name on the certificate. **Do not** set **`tls.certresolver=letsencrypt`** on routers that should use the file-loaded PEM (otherwise Traefik tries ACME for that router).
+
+Minimal example (custom PEM / Sectigo, hostname must match cert SANs):
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.myapp.rule=Host(`app.example.com`)"
+  - "traefik.http.routers.myapp.entrypoints=websecure"
+  - "traefik.http.services.myapp.loadbalancer.server.port=3000"
+```
+
+Compare with **Let’s Encrypt** on the same stack (only difference: the **`certresolver`** line):
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.myapp.rule=Host(`app.example.com`)"
+  - "traefik.http.routers.myapp.entrypoints=websecure"
+  - "traefik.http.routers.myapp.tls.certresolver=letsencrypt"
+  - "traefik.http.services.myapp.loadbalancer.server.port=3000"
+```
+
+You do **not** need `traefik.http.routers.myapp.tls=true` when using `websecure` — TLS is implied for that entrypoint. If you use **both** ACME and file certs on one Traefik, use **different router names** and only add **`certresolver`** on hosts that should use Let’s Encrypt.
 
 ---
 
