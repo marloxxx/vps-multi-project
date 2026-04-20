@@ -9,7 +9,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.dashboard.yml \
 #     -f docker-compose.licentra-filetls.yml --env-file ../../.env up -d
 #
-# In tls-certificates.yml use container paths: /certs/fullchain.pem, /certs/key.pem (or your filenames).
+# Template: infra/traefik/dynamic/tls-certificates.example.yml → copy to
+#   ${LICENTRA_APP_ROOT}/traefik/dynamic/tls-certificates.yml
+# Use container paths: /certs/fullchain.pem, /certs/key.pem (or your filenames).
 
 services:
   traefik:

@@ -1,0 +1,15 @@
+# Copy to your Licentra app tree as traefik/dynamic/tls-certificates.yml when using
+# docker-compose.licentra-filetls.yml (LICENTRA_APP_ROOT must contain ssl/ + traefik/dynamic/).
+#
+# Loaded by Traefik when TRAEFIK_PROVIDERS_FILE_DIRECTORY points at that directory.
+# Host Traefik must mount the repo ssl/ folder at /certs (read-only) — see overlay compose file.
+#
+# On the server, ssl/ must contain exactly these two PEM paths (names matter):
+#   fullchain.pem — leaf + CA intermediates, e.g.
+#     sh -c 'cat ssl/your-leaf.crt ssl/your-bundle.ca-bundle > ssl/fullchain.pem'
+#   key.pem       — private key only (copy or rename your key file to key.pem; chmod 600).
+
+tls:
+  certificates:
+    - certFile: /certs/fullchain.pem
+      keyFile: /certs/key.pem
