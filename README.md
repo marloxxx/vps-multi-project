@@ -21,7 +21,7 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 **CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
 **Docker auto-install:** enabled by default (`AUTO_INSTALL_DOCKER=1`).  
 **Portainer + Traefik dashboard:** required and started during setup.
-**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `storage.<base>`, `s3.<base>`).
+**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `minio.<base>`, `s3.<base>`).
 
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 

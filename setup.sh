@@ -186,7 +186,7 @@ enforce_base_domain_hosts() {
   fi
 
   if [[ "${START_MINIO:-1}" == "1" ]]; then
-    set_or_append_env MINIO_CONSOLE_HOST "storage.${base_domain}"
+    set_or_append_env MINIO_CONSOLE_HOST "minio.${base_domain}"
     set_or_append_env MINIO_API_HOST "s3.${base_domain}"
   else
     sed_inplace '/^MINIO_CONSOLE_HOST=/d' "$ENV_FILE" 2>/dev/null || true

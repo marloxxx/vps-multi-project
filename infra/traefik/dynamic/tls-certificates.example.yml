@@ -1,11 +1,7 @@
 # Example dynamic TLS for Traefik file provider (not enabled in stock traefik.yml).
-# Mount this file’s directory into the container and set providers.file.directory to match.
-# Mount PEMs where certFile/keyFile point (e.g. /certs). See docs/TRAEFIK.md (custom PEM).
+# Copy-on-server layout + compose mounts: docs/TRAEFIK.md → “Example: host layout /opt/ssl/ptsi/”.
 #
-# On the server, ssl/ must contain exactly these two PEM paths (names matter):
-#   fullchain.pem — leaf + CA intermediates, e.g.
-#     sh -c 'cat ssl/your-leaf.crt ssl/your-bundle.ca-bundle > ssl/fullchain.pem'
-#   key.pem       — private key only (copy or rename your key file to key.pem; chmod 600).
+# Host PEM dir (e.g. /opt/ssl/ptsi/certs): fullchain.pem (leaf + intermediates), key.pem (chmod 600).
 
 tls:
   certificates:
