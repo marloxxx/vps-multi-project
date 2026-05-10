@@ -15,8 +15,9 @@ services:
     container_name: postgres
     # Default Docker /dev/shm (64MiB) is too small for parallel queries and many
     # backends; Postgres then logs "could not resize shared memory segment … No
-    # space left on device" (shm full, not necessarily disk).
-    shm_size: "512mb"
+    # space left on device" (shm full, not necessarily disk). Raise if errors persist
+    # after verifying HostConfig.ShmSize on the running container (must recreate).
+    shm_size: "1gb"
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
