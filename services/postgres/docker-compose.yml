@@ -18,6 +18,8 @@ services:
     # space left on device" (shm full, not necessarily disk). Raise if errors persist
     # after verifying HostConfig.ShmSize on the running container (must recreate).
     shm_size: "1gb"
+    # Default 10s stop → Docker SIGKILL can interrupt checkpoint; give Postgres time to exit cleanly.
+    stop_grace_period: 90s
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -34,6 +36,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # Do not mark unhealthy (and trigger restarts) while crash recovery is still running.
+      start_period: 120s
 
 volumes:
   postgres_data:
