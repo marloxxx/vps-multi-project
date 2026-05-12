@@ -72,6 +72,8 @@ cd /opt/stack
 ./scripts/stack-manage.sh restart postgres
 ```
 
+Skrip menunggu `pg_isready` hingga **120 detik** (ubah dengan `TUNE_WAIT_READY_SECONDS=300`). Jangan menjalankan saat container belum `Up` atau DB masih recovery — jika `psql` gagal dulu, **jalankan lagi** `tune-postgres.sh` setelah log menunjukkan *ready to accept connections*, lalu **restart** Postgres sekali lagi agar `shared_buffers` / `max_connections` terpakai.
+
 Nilai default (~16 GiB RAM) bisa dioverride lewat env, contoh:
 
 ```bash

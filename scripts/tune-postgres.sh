@@ -3,6 +3,7 @@
 # Override any value via env before running, e.g.:
 #   TUNE_SHARED_BUFFERS=1GB ./scripts/tune-postgres.sh
 #
+# Waits until Postgres accepts connections (avoids failure while DB is in recovery).
 # Defaults target a ~16 GiB RAM host with Postgres + other services; adjust down for smaller VPS.
 set -euo pipefail
 
@@ -20,6 +21,24 @@ docker ps --filter name=^postgres$ --filter status=running --format '{{.Names}}'
   echo "Postgres container 'postgres' is not running."
   exit 1
 }
+
+wait_for_postgres() {
+  local deadline=$((SECONDS + ${TUNE_WAIT_READY_SECONDS:-120}))
+  local db="${POSTGRES_DB:-postgres}"
+  echo "Waiting for Postgres to accept connections (db=$db, max ${TUNE_WAIT_READY_SECONDS:-120}s) …"
+  while (( SECONDS < deadline )); do
+    if docker exec postgres pg_isready -U "$POSTGRES_USER" -d "$db" -q 2>/dev/null; then
+      echo "Postgres is ready."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Timed out: Postgres still not accepting connections (recovery or misconfigured user/db)."
+  echo "Check: docker logs postgres --tail 80"
+  return 1
+}
+
+wait_for_postgres
 
 # --- defaults (override via env) ---
 TUNE_SHARED_BUFFERS="${TUNE_SHARED_BUFFERS:-2GB}"
