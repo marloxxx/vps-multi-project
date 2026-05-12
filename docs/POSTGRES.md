@@ -34,7 +34,114 @@ All DBs share the same Postgres data directory (one volume). Connection string d
 
 ---
 
+## Tuning (memory, checkpoints, connections)
+
+Tuning Postgres **tidak menggantikan** perbaikan aplikasi (deadlock, query `OFFSET` besar). Tetap ukur RAM host dan beban nyata setelah deploy.
+
+### 1. Tentukan RAM yang “terlihat” oleh Postgres
+
+Di dalam container, Postgres memakai memori **host** (kecuali Anda set `mem_limit` di Docker). Anggap **25–40% RAM** untuk Postgres total (shared buffers + koneksi × `work_mem` + cache OS), selebihnya untuk OS, container lain, dan aplikasi.
+
+Contoh VPS **4 GiB RAM**, satu DB berat:
+
+| Parameter | Arah umum | Contoh konservatif |
+|-----------|-----------|-------------------|
+| `shared_buffers` | Cache data di Postgres | `512MB` – `1GB` (jangan setengah RAM kecuali khusus DWH) |
+| `effective_cache_size` | Petunjuk planner (RAM OS + shared) | `2GB` – `3GB` |
+| `work_mem` | Sort/hash **per operasi per query**; `× max_connections` bisa besar | `4MB` – `16MB` (turunkan jika OOM) |
+| `maintenance_work_mem` | VACUUM, CREATE INDEX | `128MB` – `512MB` |
+| `max_connections` | Setiap koneksi punya overhead | Sesuaikan pool app; default 100 sering berlebihan → **turunkan** atau naikkan RAM |
+
+### 2. Kurangi lonjakan checkpoint (log `write=269s`)
+
+Wal banyak dirty page → checkpoint panjang.
+
+| Parameter | Fungsi |
+|-----------|--------|
+| `max_wal_size` | Naikkan (mis. `2GB`–`4GB`) agar checkpoint lebih jarang (trade-off: recovery lebih lama jika crash) |
+| `checkpoint_timeout` | Default 5 menit; bisa `15min` bersama `max_wal_size` yang wajar |
+| `checkpoint_completion_target` | `0.9` (spread flush) — sering sudah default di PG16 |
+
+### 3. Cara menerapkan di stack ini
+
+**Skrip (disarankan):** dari repo / `/opt/stack` setelah `git pull`:
+
+```bash
+cd /opt/stack
+./scripts/tune-postgres.sh
+./scripts/stack-manage.sh restart postgres
+```
+
+Nilai default (~16 GiB RAM) bisa dioverride lewat env, contoh:
+
+```bash
+TUNE_SHARED_BUFFERS=1GB TUNE_EFFECTIVE_CACHE_SIZE=6GB ./scripts/tune-postgres.sh
+```
+
+**Opsi A — `ALTER SYSTEM` manual (setara isi skrip)**
+
+```bash
+set -a && source /opt/stack/.env && set +a
+docker exec postgres psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -c "
+ALTER SYSTEM SET shared_buffers = '512MB';
+ALTER SYSTEM SET effective_cache_size = '2GB';
+ALTER SYSTEM SET work_mem = '8MB';
+ALTER SYSTEM SET maintenance_work_mem = '256MB';
+ALTER SYSTEM SET max_connections = '80';
+ALTER SYSTEM SET max_wal_size = '2GB';
+ALTER SYSTEM SET checkpoint_timeout = '15min';
+"
+docker compose -f /opt/stack/services/postgres/docker-compose.yml --env-file /opt/stack/.env restart postgres
+```
+
+Sesuaikan angka ke **RAM VPS** Anda sebelum menjalankan.
+
+**Opsi B — override lewat `command` di `services/postgres/docker-compose.yml`**
+
+Tambahkan pada service `postgres` (contoh; nilai wajib disesuaikan):
+
+```yaml
+command:
+  - postgres
+  - -c
+  - shared_buffers=512MB
+  - -c
+  - effective_cache_size=2GB
+  - -c
+  - work_mem=8MB
+  - -c
+  - max_wal_size=2GB
+  - -c
+  - checkpoint_timeout=15min
+```
+
+Recreate container agar `command` terpakai. Catatan: jika sudah pakai `ALTER SYSTEM`, nilai di data dir bisa menang atau bentrok — pilih **satu** sumber kebenaran (biasanya `ALTER SYSTEM` + restart, tanpa duplikat di `command`).
+
+### 4. Verifikasi
+
+```bash
+docker exec postgres psql -U "$POSTGRES_USER" -d postgres -c "SHOW shared_buffers; SHOW work_mem; SHOW max_connections; SHOW max_wal_size;"
+```
+
+### 5. SSD vs HDD
+
+Di SSD/NVMe, planner sering diuntungkan dengan:
+
+```sql
+ALTER SYSTEM SET random_page_cost = 1.1;
+ALTER SYSTEM SET effective_io_concurrency = 200;  -- Linux async read
+```
+
+(Hanya relevan jika storage benar-benar cepat.)
+
+### 6. Alat bantu sizing
+
+- [pgtune](https://pgtune.leopard.in.ua/) — masukkan RAM dan tipe workload, salin saran lalu sesuaikan konservatif untuk VPS kecil.
+- Pantau: `docker logs postgres`, `pg_stat_statements` (extension), dan `EXPLAIN (ANALYZE, BUFFERS)` untuk query berat.
+
+---
+
 ## Related
 
 - `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR` (`POSTGRES_DB` optional)
-- `services/postgres/docker-compose.yml` – container definition
+- `services/postgres/docker-compose.yml` – container definition (`shm_size`, `stop_grace_period`, healthcheck)
