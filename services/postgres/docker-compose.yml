@@ -11,7 +11,13 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector has no alpine variant; pg16-trixie (Debian 13) is the
+    # postgres:16 base + pgvector extension binaries. Switching from
+    # postgres:16-alpine changes the OS base but not the Postgres major version
+    # (16), so the existing data directory is unaffected. CREATE EXTENSION vector
+    # still has to be run per-database (see docs/POSTGRES.md) since it is not
+    # enabled by default.
+    image: pgvector/pgvector:pg16-trixie
     container_name: postgres
     # Default Docker /dev/shm (64MiB) is too small for parallel queries and many
     # backends; Postgres then logs "could not resize shared memory segment … No

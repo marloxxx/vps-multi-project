@@ -143,6 +143,48 @@ ALTER SYSTEM SET effective_io_concurrency = 200;  -- Linux async read
 
 ---
 
+## pgvector (vector similarity search)
+
+The `postgres` service image is `pgvector/pgvector:pg16-trixie` (Debian 13 base;
+pgvector ships no Alpine variant), which bundles the
+[pgvector](https://github.com/pgvector/pgvector) extension binaries on top of a
+regular `postgres:16` image. The extension is **not** enabled by default — it
+must be created **per database**, only for the projects that need it:
+
+```bash
+set -a && source /opt/stack/.env && set +a
+docker exec postgres psql -U "$POSTGRES_USER" -d <dbname> -v ON_ERROR_STOP=1 \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+Run this after `stackctl provision-postgres <project>` (using `<project>_db` as
+`<dbname>`) if that project needs vector search.
+
+Verify:
+
+```bash
+docker exec postgres psql -U "$POSTGRES_USER" -d <dbname> -c "\dx vector"
+```
+
+Example table with a vector column and an HNSW index (adjust dimensions to match
+your embedding model):
+
+```sql
+CREATE TABLE items (
+  id bigserial PRIMARY KEY,
+  embedding vector(1536)
+);
+CREATE INDEX ON items USING hnsw (embedding vector_cosine_ops);
+```
+
+**Upgrading an existing stack:** pulling the new image and recreating the
+container (`stackctl restart postgres` or `docker compose ... up -d postgres`) is
+safe — it is still Postgres 16 (same data directory layout), only the OS base
+moves from Alpine to Debian trixie and the extension binaries are added. No
+dump/restore needed.
+
+---
+
 ## Related
 
 - `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR` (`POSTGRES_DB` optional)
