@@ -6,58 +6,59 @@ Single **postgres** container; data under `/opt/volumes/postgres`. You can run *
 
 ## Backups
 
+**Safety model:** local `/opt/backups` is only staging. Real protection is **Google Drive** (rclone). Without `BACKUP_RCLONE_REMOTE`, the job **fails** by default (`BACKUP_REQUIRE_RCLONE=1`).
+
 | Script | Purpose |
 |--------|--------|
-| `scripts/auto-backup.sh` | **Scheduled runner**: dump DBs, prune, optional rclone upload |
+| `scripts/auto-backup.sh` | Dump DBs → prune local → **upload to Drive** |
+| `scripts/setup-rclone-gdrive.sh` | Install rclone + Google Drive OAuth guide |
 | `scripts/install-auto-backup.sh` | Install / remove `/etc/cron.d/stack-backup` |
-| `scripts/setup-rclone-gdrive.sh` | Install rclone + guide Google Drive remote |
-| `scripts/backup-postgres.sh` | Dump **one** Postgres DB (`POSTGRES_DB` from `.env`, or `postgres`) |
-| `scripts/backup-postgres-all-dbs.sh` | Dump **every** non-template Postgres DB (`DB_PREFIX=` optional) |
-| `scripts/backup-mysql-all-dbs.sh` | Dump **every** non-system MySQL DB |
-| `scripts/restore-drill.sh` | Restore a dump into a **temporary** DB then drop it |
+| `scripts/backup-postgres.sh` | Dump **one** Postgres DB |
+| `scripts/backup-postgres-all-dbs.sh` | Dump every non-template Postgres DB |
+| `scripts/backup-mysql-all-dbs.sh` | Dump every non-system MySQL DB |
+| `scripts/restore-drill.sh` | Prove a dump restores (temp DB) |
 
-### Auto-backup (cron)
-
-Installed by `setup.sh` (daily **03:00**) and managed via:
+### 1. Google Drive first (required)
 
 ```bash
-stackctl auto-backup status
-stackctl auto-backup enable    # (re)write /etc/cron.d/stack-backup
-stackctl auto-backup disable
-stackctl auto-backup run       # run once now
-```
+stackctl auto-backup gdrive-setup
+sudo rclone config                  # remote name e.g. gdrive + OAuth
 
-Tune via `/opt/stack/.env` (see `.env.example`):
+# /opt/stack/.env
+BACKUP_RCLONE_REMOTE=gdrive:vps-backups/my-server
+# BACKUP_REQUIRE_RCLONE=1
+# BACKUP_RCLONE_MODE=copy
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `BACKUP_CRON` | `0 3 * * *` | Cron schedule (after `enable`) |
-| `BACKUP_RETENTION_DAYS` | `7` | Delete `pg_*.sql.gz` / `mysql_*.sql.gz` older than N days (`0` = keep forever) |
-| `BACKUP_POSTGRES_MODE` | `all` | `all` = every DB; `default` = only `POSTGRES_DB` |
-| `BACKUP_INCLUDE_MYSQL` | `auto` | `auto` / `1` / `0` |
-| `BACKUP_DIR` | `/opt/backups/postgres` | Postgres dump directory |
-| `BACKUP_DIR_MYSQL` | `/opt/backups/mysql` | MySQL dump directory |
-| `BACKUP_LOG` | `/opt/backups/auto-backup.log` | Cron / runner log |
-| `BACKUP_RCLONE_REMOTE` | _(empty)_ | Off-site target, e.g. `gdrive:vps-backups/host` — empty = no upload |
-| `BACKUP_RCLONE_MODE` | `copy` | `copy` keeps extra remote files; `sync` mirrors local (deletes remote extras) |
-| `BACKUP_RCLONE_CONFIG` | _(rclone default)_ | Path to `rclone.conf` (use root’s config for cron) |
-| `BACKUP_UPLOAD_DIR` | `/opt/backups` | Local folder uploaded to the remote |
-| `BACKUP_RCLONE_ARGS` | `--transfers=4 --checkers=8` | Extra rclone flags |
-
-After changing `BACKUP_CRON`, run `stackctl auto-backup enable` again so the cron file is rewritten.
-
-### Google Drive (rclone)
-
-```bash
-stackctl auto-backup gdrive-setup   # install rclone + print OAuth steps
-# complete: sudo rclone config  (remote name e.g. gdrive)
-# then in /opt/stack/.env:
-#   BACKUP_RCLONE_REMOTE=gdrive:vps-backups/$(hostname)
 stackctl auto-backup gdrive-check
+stackctl auto-backup enable
 stackctl auto-backup run
 ```
 
-Cron runs as **root**, so configure rclone as root (`sudo rclone config`) or set `BACKUP_RCLONE_CONFIG` to that conf file. Never commit `rclone.conf` / tokens.
+Cron runs as **root** → `sudo rclone config`. Never commit `rclone.conf`.
+
+### 2. Cron / local staging
+
+```bash
+stackctl auto-backup status
+stackctl auto-backup enable
+stackctl auto-backup run
+```
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `BACKUP_RCLONE_REMOTE` | _(empty)_ | **Required** — e.g. `gdrive:vps-backups/host` |
+| `BACKUP_REQUIRE_RCLONE` | `1` | Fail if Drive upload did not succeed |
+| `BACKUP_RCLONE_MODE` | `copy` | `copy` keeps extra Drive files; `sync` mirrors local |
+| `BACKUP_RCLONE_CONFIG` | _(rclone default)_ | Path to root’s `rclone.conf` if needed |
+| `BACKUP_UPLOAD_DIR` | `/opt/backups` | Folder uploaded to Drive |
+| `BACKUP_RCLONE_ARGS` | `--transfers=4 --checkers=8` | Extra rclone flags |
+| `BACKUP_CRON` | `0 3 * * *` | Schedule (re-`enable` after change) |
+| `BACKUP_RETENTION_DAYS` | `7` | Local prune only |
+| `BACKUP_POSTGRES_MODE` | `all` | `all` or `default` |
+| `BACKUP_INCLUDE_MYSQL` | `auto` | `auto` / `1` / `0` |
+| `BACKUP_DIR` | `/opt/backups/postgres` | Local Postgres dumps |
+| `BACKUP_DIR_MYSQL` | `/opt/backups/mysql` | Local MySQL dumps |
+| `BACKUP_LOG` | `/opt/backups/auto-backup.log` | Job log |
 
 ---
 

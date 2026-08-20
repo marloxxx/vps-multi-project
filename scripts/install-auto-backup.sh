@@ -53,6 +53,23 @@ EOF
   echo "  script   : $BACKUP_SCRIPT"
   echo "  log      : $LOG_FILE"
   echo "  retention: ${RETENTION_DAYS} day(s) (BACKUP_RETENTION_DAYS)"
+  warn_drive_required
+}
+
+warn_drive_required() {
+  case "${BACKUP_REQUIRE_RCLONE:-1}" in
+    0|false|no|off) return 0 ;;
+  esac
+  if [[ -z "${BACKUP_RCLONE_REMOTE:-}" ]]; then
+    echo ""
+    echo "WARNING: BACKUP_RCLONE_REMOTE is not set."
+    echo "  Local dumps on this VPS are not enough if the server is lost."
+    echo "  Next steps:"
+    echo "    stackctl auto-backup gdrive-setup"
+    echo "    # add to .env: BACKUP_RCLONE_REMOTE=gdrive:vps-backups/\$(hostname)"
+    echo "    stackctl auto-backup gdrive-check && stackctl auto-backup run"
+    echo "  (Or set BACKUP_REQUIRE_RCLONE=0 for local-only — not recommended.)"
+  fi
 }
 
 remove_cron() {
@@ -69,7 +86,7 @@ remove_cron() {
 }
 
 show_status() {
-  echo "Auto-backup status"
+  echo "Auto-backup status (off-site Drive = primary safety)"
   echo "  cron file : $CRON_FILE"
   if [[ -f "$CRON_FILE" ]]; then
     echo "  installed : yes"
@@ -79,18 +96,20 @@ show_status() {
     echo "  installed : no"
   fi
   echo "  schedule  : ${BACKUP_SCHEDULE} (BACKUP_CRON)"
-  echo "  retention : ${RETENTION_DAYS} day(s)"
+  echo "  retention : ${RETENTION_DAYS} day(s) local staging"
   echo "  pg mode   : ${BACKUP_POSTGRES_MODE:-all}"
   echo "  mysql     : ${BACKUP_INCLUDE_MYSQL:-auto}"
+  echo "  require off-site: ${BACKUP_REQUIRE_RCLONE:-1}"
   if [[ -n "${BACKUP_RCLONE_REMOTE:-}" ]]; then
     echo "  rclone    : ${BACKUP_RCLONE_REMOTE} (mode=${BACKUP_RCLONE_MODE:-copy})"
     if command -v rclone >/dev/null 2>&1; then
       echo "  rclone bin: $(command -v rclone)"
     else
-      echo "  rclone bin: MISSING (run scripts/setup-rclone-gdrive.sh)"
+      echo "  rclone bin: MISSING — stackctl auto-backup gdrive-setup"
     fi
   else
-    echo "  rclone    : off (set BACKUP_RCLONE_REMOTE in .env)"
+    echo "  rclone    : NOT CONFIGURED — backups are not VPS-failure safe"
+    echo "              → stackctl auto-backup gdrive-setup"
   fi
   echo "  log       : $LOG_FILE"
   if [[ -f "$LOG_FILE" ]]; then

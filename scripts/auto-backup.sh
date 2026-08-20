@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# Scheduled / on-demand stack backup:
-#   - all Postgres DBs (default), or only POSTGRES_DB if BACKUP_POSTGRES_MODE=default
-#   - all MySQL DBs when container is up (unless BACKUP_INCLUDE_MYSQL=0)
-#   - prune dumps older than BACKUP_RETENTION_DAYS
-#   - optional off-site upload via rclone (Google Drive, etc.) when BACKUP_RCLONE_REMOTE is set
+# Scheduled / on-demand stack backup (Drive-first safety model):
+#   1. dump Postgres (+ MySQL if running) to local /opt/backups
+#   2. prune local dumps older than BACKUP_RETENTION_DAYS
+#   3. upload to Google Drive / off-site via rclone (BACKUP_RCLONE_REMOTE)
+#
+# Local dumps alone are not considered safe if the VPS dies — off-site is required
+# unless BACKUP_REQUIRE_RCLONE=0.
 #
 # Usage:
 #   ./scripts/auto-backup.sh
@@ -27,15 +29,14 @@ POSTGRES_MODE="${BACKUP_POSTGRES_MODE:-all}"   # all | default
 INCLUDE_MYSQL="${BACKUP_INCLUDE_MYSQL:-auto}" # auto | 1 | 0
 LOG_FILE="${BACKUP_LOG:-$OPT_BASE/backups/auto-backup.log}"
 
-# Off-site (rclone). Empty remote = skip.
-# Example: BACKUP_RCLONE_REMOTE=gdrive:vps-backups/my-server
+# Off-site (rclone) — primary safety. Example: gdrive:vps-backups/my-server
 RCLONE_REMOTE="${BACKUP_RCLONE_REMOTE:-}"
 RCLONE_MODE="${BACKUP_RCLONE_MODE:-copy}"     # copy | sync
 RCLONE_BIN="${BACKUP_RCLONE_BIN:-rclone}"
 RCLONE_CONFIG_FILE="${BACKUP_RCLONE_CONFIG:-}"
-# Extra flags, space-separated (quoted tokens not supported — keep simple)
-# Example: BACKUP_RCLONE_ARGS=--transfers=4 --checkers=8
 RCLONE_ARGS="${BACKUP_RCLONE_ARGS:---transfers=4 --checkers=8}"
+# Fail the job if off-site upload did not run successfully (default: on)
+REQUIRE_RCLONE="${BACKUP_REQUIRE_RCLONE:-1}"
 
 mkdir -p "$PG_BACKUP_DIR" "$MYSQL_BACKUP_DIR" "$(dirname "$LOG_FILE")"
 
@@ -43,6 +44,13 @@ log() {
   local line
   line="$(date -Iseconds) $*"
   echo "$line" | tee -a "$LOG_FILE"
+}
+
+require_rclone_on() {
+  case "$REQUIRE_RCLONE" in
+    1|true|yes|on|TRUE|YES|ON) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 prune_dir() {
@@ -67,13 +75,21 @@ is_running() {
 }
 
 rclone_upload() {
-  [[ -n "$RCLONE_REMOTE" ]] || {
-    log "SKIP rclone (BACKUP_RCLONE_REMOTE unset)"
+  if [[ -z "$RCLONE_REMOTE" ]]; then
+    if require_rclone_on; then
+      log "ERROR off-site backup required but BACKUP_RCLONE_REMOTE is unset"
+      log "ERROR local dumps alone are not safe if this VPS is lost — set Drive remote:"
+      log "ERROR   stackctl auto-backup gdrive-setup"
+      log "ERROR   then BACKUP_RCLONE_REMOTE=gdrive:vps-backups/<hostname> in .env"
+      log "ERROR (or set BACKUP_REQUIRE_RCLONE=0 to allow local-only)"
+      return 1
+    fi
+    log "WARN SKIP rclone — BACKUP_RCLONE_REMOTE unset (local-only; not VPS-failure safe)"
     return 0
-  }
+  fi
 
   if ! command -v "$RCLONE_BIN" >/dev/null 2>&1; then
-    log "ERROR rclone not found (install rclone, or set BACKUP_RCLONE_BIN). Remote was: $RCLONE_REMOTE"
+    log "ERROR rclone not found (install: stackctl auto-backup gdrive-setup). Remote was: $RCLONE_REMOTE"
     return 1
   fi
 
@@ -96,18 +112,17 @@ rclone_upload() {
 
   # shellcheck disable=SC2206
   local extra=( $RCLONE_ARGS )
-  log "rclone ${RCLONE_MODE}: $LOCAL_BACKUP_ROOT -> $RCLONE_REMOTE"
-  # Prefer dumps + log; skip nothing critical under backups root
+  log "Off-site (rclone ${RCLONE_MODE}): $LOCAL_BACKUP_ROOT -> $RCLONE_REMOTE"
   if ! "$RCLONE_BIN" "$RCLONE_MODE" \
     "${conf_args[@]}" \
     "${extra[@]}" \
     --log-level INFO \
     "$LOCAL_BACKUP_ROOT" \
     "$RCLONE_REMOTE"; then
-    log "ERROR rclone ${RCLONE_MODE} failed"
+    log "ERROR rclone ${RCLONE_MODE} to Drive/remote FAILED — dumps may exist only on this VPS"
     return 1
   fi
-  log "rclone ${RCLONE_MODE} OK"
+  log "Off-site upload OK → $RCLONE_REMOTE"
   return 0
 }
 
@@ -162,18 +177,17 @@ else
   log "SKIP mysql (disabled or not configured)"
 fi
 
-# ---------- Retention (local) ----------
+# ---------- Retention (local staging) ----------
 prune_dir "$PG_BACKUP_DIR" "$RETENTION_DAYS"
 prune_dir "$MYSQL_BACKUP_DIR" "$RETENTION_DAYS"
 
-# ---------- Off-site (rclone → Google Drive / S3 / …) ----------
-# Run after prune so `sync` mirrors local retention; `copy` keeps remote extras.
+# ---------- Off-site (required for safety) ----------
 if ! rclone_upload; then
   rc=1
 fi
 
 if [[ "$rc" -eq 0 ]]; then
-  log "==== auto-backup OK ===="
+  log "==== auto-backup OK (local + off-site) ===="
 else
   log "==== auto-backup FINISHED WITH ERRORS ===="
 fi

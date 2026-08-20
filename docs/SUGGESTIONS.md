@@ -45,10 +45,9 @@ Restart Docker after editing.
 
 ## Backups
 
-- `stackctl auto-backup enable` / `run` / `status` — daily dumps + retention (see `docs/POSTGRES.md`).
-- Google Drive: `stackctl auto-backup gdrive-setup` then set `BACKUP_RCLONE_REMOTE` in `.env`.
-- Run `scripts/restore-drill.sh` periodically to verify dumps.
-- **rclone** / **restic** – off-site copy of `/opt/backups` (rclone is integrated when `BACKUP_RCLONE_REMOTE` is set).
+- **Google Drive first:** `stackctl auto-backup gdrive-setup` → set `BACKUP_RCLONE_REMOTE` (job fails without it by default).
+- Local `/opt/backups` is staging only; VPS loss without Drive = data loss.
+- Run `scripts/restore-drill.sh` periodically; optionally download a dump from Drive and restore.
 
 ---
 

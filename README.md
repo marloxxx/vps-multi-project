@@ -44,10 +44,12 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 ## Backups
 
 ```bash
-stackctl auto-backup enable   # /etc/cron.d/stack-backup (daily 03:00)
-stackctl auto-backup run      # run once now
+# Off-site Drive is required for safety (BACKUP_REQUIRE_RCLONE=1)
+stackctl auto-backup gdrive-setup
+# set BACKUP_RCLONE_REMOTE=gdrive:vps-backups/<host> in .env
+stackctl auto-backup enable
+stackctl auto-backup run
 stackctl auto-backup status
-stackctl auto-backup gdrive-setup   # rclone → Google Drive (optional)
 
 /opt/stack/scripts/backup-postgres.sh
 /opt/stack/scripts/backup-postgres-all-dbs.sh
