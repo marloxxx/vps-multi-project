@@ -307,6 +307,40 @@ backup_all_dbs() {
   "$ROOT/scripts/backup-postgres-all-dbs.sh"
 }
 
+auto_backup() {
+  local sub="${1:-status}"
+  case "$sub" in
+    run)
+      audit_log "auto-backup run"
+      "$ROOT/scripts/auto-backup.sh"
+      ;;
+    enable|install)
+      audit_log "auto-backup enable"
+      "$ROOT/scripts/install-auto-backup.sh" enable
+      ;;
+    disable|remove|uninstall)
+      audit_log "auto-backup disable"
+      "$ROOT/scripts/install-auto-backup.sh" disable
+      ;;
+    gdrive-setup|rclone-setup)
+      audit_log "auto-backup gdrive-setup"
+      "$ROOT/scripts/setup-rclone-gdrive.sh" guide
+      ;;
+    gdrive-check|rclone-check)
+      audit_log "auto-backup gdrive-check"
+      "$ROOT/scripts/setup-rclone-gdrive.sh" check
+      ;;
+    status|"")
+      audit_log "auto-backup status"
+      "$ROOT/scripts/install-auto-backup.sh" status
+      ;;
+    *)
+      echo "Usage: stackctl auto-backup {enable|disable|status|run|gdrive-setup|gdrive-check}"
+      return 1
+      ;;
+  esac
+}
+
 restore_drill() {
   audit_log "restore-drill dump=${1:-latest}"
   "$ROOT/scripts/restore-drill.sh" "${1:-}"
@@ -876,8 +910,9 @@ Commands:
   health [core|all|service]    Run basic health checks
   MinIO (core/all only): START_MINIO=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if MINIO_API_HOST, MINIO_CONSOLE_HOST, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD are all set. Else: stackctl start minio
   logs <service>               Follow logs for a service
-  backup                       Backup default database
-  backup-all                   Backup all databases
+  backup                       Backup default Postgres database
+  backup-all                   Backup all Postgres databases
+  auto-backup <action>         Scheduled backups: enable|disable|status|run|gdrive-setup|gdrive-check
   restore-drill [dump-file]    Test restore into temp database
   psql [db]                    Open psql shell in postgres container
   mysql [db]                   Open mysql shell in mysql container
@@ -905,6 +940,8 @@ Examples:
   ./scripts/stack-manage.sh drop-db postgres clay_erp --yes
   ./scripts/stack-manage.sh credentials postgres
   ./scripts/stack-manage.sh open-db-port postgres 203.0.113.10
+  ./scripts/stack-manage.sh auto-backup enable
+  ./scripts/stack-manage.sh auto-backup run
   ./scripts/stack-manage.sh install-bin stackctl
 EOF
 }
@@ -924,15 +961,18 @@ Stack Management Menu
 8) Logs one service
 9) Backup default DB
 10) Backup all DBs
-11) Restore drill
-12) Open psql shell
-13) Open mysql shell
-14) Provision MySQL project DB
-15) Provision PostgreSQL project DB
-16) Drop MySQL project DB
-17) Drop PostgreSQL project DB
-18) Show credentials
-19) Install /usr/bin command
+11) Auto-backup status
+12) Auto-backup enable (cron)
+13) Auto-backup run now
+14) Restore drill
+15) Open psql shell
+16) Open mysql shell
+17) Provision MySQL project DB
+18) Provision PostgreSQL project DB
+19) Drop MySQL project DB
+20) Drop PostgreSQL project DB
+21) Show credentials
+22) Install /usr/bin command
 0) Exit
 EOF
     read -r -p "Choose: " choice
@@ -959,39 +999,42 @@ EOF
         ;;
       9) backup_db ;;
       10) backup_all_dbs ;;
-      11)
+      11) auto_backup status ;;
+      12) auto_backup enable ;;
+      13) auto_backup run ;;
+      14)
         read -r -p "Dump file path (empty = latest): " dump
         restore_drill "$dump"
         ;;
-      12)
+      15)
         read -r -p "Database name (empty = POSTGRES_DB or postgres): " db
         psql_shell "$db"
         ;;
-      13)
+      16)
         read -r -p "Database name (empty = MYSQL_DATABASE): " db
         mysql_shell "$db"
         ;;
-      14)
+      17)
         read -r -p "Project name: " project
         provision_mysql_project "$project"
         ;;
-      15)
+      18)
         read -r -p "Project name: " project
         provision_postgres_project "$project"
         ;;
-      16)
+      19)
         read -r -p "Project name: " project
         drop_mysql_project "$project" 0
         ;;
-      17)
+      20)
         read -r -p "Project name: " project
         drop_postgres_project "$project" 0
         ;;
-      18)
+      21)
         read -r -p "Target (all/postgres/redis/minio/monitoring/mysql/portainer) [all]: " target
         show_credentials "${target:-all}"
         ;;
-      19)
+      22)
         read -r -p "Command name (default stackctl): " name
         install_bin "${name:-stackctl}"
         ;;
@@ -1012,6 +1055,7 @@ case "$cmd" in
   logs) logs_service "${2:-postgres}" ;;
   backup) backup_db ;;
   backup-all) backup_all_dbs ;;
+  auto-backup) auto_backup "${2:-status}" ;;
   restore-drill) restore_drill "${2:-}" ;;
   psql) psql_shell "${2:-}" ;;
   mysql) mysql_shell "${2:-}" ;;

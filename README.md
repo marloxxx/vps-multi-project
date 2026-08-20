@@ -44,8 +44,14 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 ## Backups
 
 ```bash
+stackctl auto-backup enable   # /etc/cron.d/stack-backup (daily 03:00)
+stackctl auto-backup run      # run once now
+stackctl auto-backup status
+stackctl auto-backup gdrive-setup   # rclone → Google Drive (optional)
+
 /opt/stack/scripts/backup-postgres.sh
 /opt/stack/scripts/backup-postgres-all-dbs.sh
+/opt/stack/scripts/backup-mysql-all-dbs.sh
 /opt/stack/scripts/restore-drill.sh
 ```
 
@@ -83,6 +89,7 @@ stackctl start portainer
 stackctl health all
 stackctl logs postgres
 stackctl backup
+stackctl auto-backup status
 stackctl mysql
 stackctl credentials all
 stackctl provision-db mysql billing

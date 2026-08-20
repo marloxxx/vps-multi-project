@@ -8,11 +8,56 @@ Single **postgres** container; data under `/opt/volumes/postgres`. You can run *
 
 | Script | Purpose |
 |--------|--------|
-| `scripts/backup-postgres.sh` | Dumps **one** DB (`POSTGRES_DB` from `.env`, or `postgres` if unset) |
-| `scripts/backup-postgres-all-dbs.sh` | Dumps **every** non-template DB (optional `DB_PREFIX=` to filter by name prefix) |
-| `scripts/restore-drill.sh` | Restores a dump into a **temporary** DB then drops it (proves backups work) |
+| `scripts/auto-backup.sh` | **Scheduled runner**: dump DBs, prune, optional rclone upload |
+| `scripts/install-auto-backup.sh` | Install / remove `/etc/cron.d/stack-backup` |
+| `scripts/setup-rclone-gdrive.sh` | Install rclone + guide Google Drive remote |
+| `scripts/backup-postgres.sh` | Dump **one** Postgres DB (`POSTGRES_DB` from `.env`, or `postgres`) |
+| `scripts/backup-postgres-all-dbs.sh` | Dump **every** non-template Postgres DB (`DB_PREFIX=` optional) |
+| `scripts/backup-mysql-all-dbs.sh` | Dump **every** non-system MySQL DB |
+| `scripts/restore-drill.sh` | Restore a dump into a **temporary** DB then drop it |
 
-Cron for single DB is installed by `setup.sh` (daily 03:00). For **all DBs**, add a second cron line calling `backup-postgres-all-dbs.sh` if needed.
+### Auto-backup (cron)
+
+Installed by `setup.sh` (daily **03:00**) and managed via:
+
+```bash
+stackctl auto-backup status
+stackctl auto-backup enable    # (re)write /etc/cron.d/stack-backup
+stackctl auto-backup disable
+stackctl auto-backup run       # run once now
+```
+
+Tune via `/opt/stack/.env` (see `.env.example`):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `BACKUP_CRON` | `0 3 * * *` | Cron schedule (after `enable`) |
+| `BACKUP_RETENTION_DAYS` | `7` | Delete `pg_*.sql.gz` / `mysql_*.sql.gz` older than N days (`0` = keep forever) |
+| `BACKUP_POSTGRES_MODE` | `all` | `all` = every DB; `default` = only `POSTGRES_DB` |
+| `BACKUP_INCLUDE_MYSQL` | `auto` | `auto` / `1` / `0` |
+| `BACKUP_DIR` | `/opt/backups/postgres` | Postgres dump directory |
+| `BACKUP_DIR_MYSQL` | `/opt/backups/mysql` | MySQL dump directory |
+| `BACKUP_LOG` | `/opt/backups/auto-backup.log` | Cron / runner log |
+| `BACKUP_RCLONE_REMOTE` | _(empty)_ | Off-site target, e.g. `gdrive:vps-backups/host` — empty = no upload |
+| `BACKUP_RCLONE_MODE` | `copy` | `copy` keeps extra remote files; `sync` mirrors local (deletes remote extras) |
+| `BACKUP_RCLONE_CONFIG` | _(rclone default)_ | Path to `rclone.conf` (use root’s config for cron) |
+| `BACKUP_UPLOAD_DIR` | `/opt/backups` | Local folder uploaded to the remote |
+| `BACKUP_RCLONE_ARGS` | `--transfers=4 --checkers=8` | Extra rclone flags |
+
+After changing `BACKUP_CRON`, run `stackctl auto-backup enable` again so the cron file is rewritten.
+
+### Google Drive (rclone)
+
+```bash
+stackctl auto-backup gdrive-setup   # install rclone + print OAuth steps
+# complete: sudo rclone config  (remote name e.g. gdrive)
+# then in /opt/stack/.env:
+#   BACKUP_RCLONE_REMOTE=gdrive:vps-backups/$(hostname)
+stackctl auto-backup gdrive-check
+stackctl auto-backup run
+```
+
+Cron runs as **root**, so configure rclone as root (`sudo rclone config`) or set `BACKUP_RCLONE_CONFIG` to that conf file. Never commit `rclone.conf` / tokens.
 
 ---
 
@@ -187,5 +232,6 @@ dump/restore needed.
 
 ## Related
 
-- `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR` (`POSTGRES_DB` optional)
+- `.env` – `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR`, auto-backup vars (`BACKUP_RETENTION_DAYS`, `BACKUP_CRON`, …)
 - `services/postgres/docker-compose.yml` – container definition (`shm_size`, `stop_grace_period`, healthcheck)
+- `stackctl auto-backup` – enable / disable / run scheduled backups

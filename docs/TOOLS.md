@@ -48,4 +48,4 @@ Grafana -> Prometheus data source `http://prometheus:9090`. Dashboard IDs **193*
 
 - **UI:** `services/portainer/`
 - **Metrics:** `services/monitoring/`
-- **Backups:** `scripts/backup-postgres.sh` + rclone/restic off-site
+- **Backups:** `stackctl auto-backup` → dumps + optional Google Drive via rclone (`BACKUP_RCLONE_REMOTE`)

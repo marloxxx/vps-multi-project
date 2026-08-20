@@ -45,8 +45,10 @@ Restart Docker after editing.
 
 ## Backups
 
+- `stackctl auto-backup enable` / `run` / `status` — daily dumps + retention (see `docs/POSTGRES.md`).
+- Google Drive: `stackctl auto-backup gdrive-setup` then set `BACKUP_RCLONE_REMOTE` in `.env`.
 - Run `scripts/restore-drill.sh` periodically to verify dumps.
-- **rclone** / **restic** – copy `/opt/backups` off-site (cron).
+- **rclone** / **restic** – off-site copy of `/opt/backups` (rclone is integrated when `BACKUP_RCLONE_REMOTE` is set).
 
 ---
 

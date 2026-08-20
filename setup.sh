@@ -440,7 +440,12 @@ docker_phase() {
 # ---------- host phase: swap, SSH port, ufw, fail2ban, cron ----------
 host_phase() {
   step "Host: swap, SSH port, firewall, fail2ban, cron (sudo once)"
-  chmod +x "$ROOT/scripts/backup-postgres.sh" "$ROOT/scripts/backup-postgres-all-dbs.sh" 2>/dev/null || true
+  chmod +x "$ROOT/scripts/backup-postgres.sh" \
+    "$ROOT/scripts/backup-postgres-all-dbs.sh" \
+    "$ROOT/scripts/backup-mysql-all-dbs.sh" \
+    "$ROOT/scripts/auto-backup.sh" \
+    "$ROOT/scripts/install-auto-backup.sh" \
+    "$ROOT/scripts/setup-rclone-gdrive.sh" 2>/dev/null || true
 
   # Random SSH port 20000–40000 (pick before sudo; pass into heredoc)
   local SSH_PORT
@@ -492,11 +497,20 @@ mkdir -p /etc/fail2ban/jail.d
 printf '%s\n' '[sshd]' 'enabled = true' "port = ${SSH_PORT},22" 'logpath = %(sshd_log)s' 'backend = %(sshd_backend)s' 'maxretry = 5' 'findtime = 10m' 'bantime = 1h' > /etc/fail2ban/jail.d/stack-sshd.local
 systemctl enable fail2ban 2>/dev/null || true
 systemctl restart fail2ban 2>/dev/null || service fail2ban restart 2>/dev/null || true
-echo "==> Cron backup 03:00"
-mkdir -p "$OPT_BASE/backups/postgres"
-{ echo "SHELL=/bin/bash"; echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"; echo "0 3 * * * root $ROOT/scripts/backup-postgres.sh >> $OPT_BASE/backups/postgres/cron.log 2>&1"; } > /etc/cron.d/stack-backup
+echo "==> Cron auto-backup 03:00 (all Postgres DBs + MySQL if running; retention)"
+mkdir -p "$OPT_BASE/backups/postgres" "$OPT_BASE/backups/mysql"
+chmod +x "$ROOT/scripts/auto-backup.sh" \
+  "$ROOT/scripts/backup-postgres.sh" \
+  "$ROOT/scripts/backup-postgres-all-dbs.sh" \
+  "$ROOT/scripts/backup-mysql-all-dbs.sh" 2>/dev/null || true
+{
+  echo "# Managed by setup.sh / stackctl auto-backup — re-run: stackctl auto-backup enable"
+  echo "SHELL=/bin/bash"
+  echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  echo "0 3 * * * root STACK_ROOT=${ROOT} OPT_BASE=${OPT_BASE} ENV_FILE=${ROOT}/.env ${ROOT}/scripts/auto-backup.sh >> ${OPT_BASE}/backups/auto-backup.log 2>&1"
+} > /etc/cron.d/stack-backup
 chmod 644 /etc/cron.d/stack-backup
-echo "  /etc/cron.d/stack-backup"
+echo "  /etc/cron.d/stack-backup (auto-backup.sh)"
 ROOTSCRIPT
 
   # Append SSH port to credentials file (create file if only SSH was configured)
@@ -581,7 +595,8 @@ print_success_summary() {
   echo "  Env File          : ${ENV_FILE}"
   echo "  Credentials File  : ${CREDENTIALS_FILE}"
   echo "  Audit Log         : ${ROOT}/logs/stackctl.log"
-  echo "  Backups           : ${OPT_BASE}/backups/postgres"
+  echo "  Backups           : ${OPT_BASE}/backups (auto-backup cron 03:00)"
+  echo "  Auto-backup CLI   : stackctl auto-backup status|enable|run"
   echo ""
   echo -e "${BOLD}Quick commands${NC}"
   echo "  ${STACKCTL_BIN_NAME} status"
