@@ -43,7 +43,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${SEAWEEDFS_DATA_DIR:-./data}
+      device: ${SEAWEEDFS_DATA_DIR:-/opt/volumes/seaweedfs}
 
 networks:
   backend:

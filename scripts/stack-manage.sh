@@ -116,6 +116,7 @@ prepare_mysql_data_dir() {
 }
 
 # Bind-mounted SeaweedFS data: Docker does not create the host path for driver local + bind.
+# Default must match services/seaweedfs/docker-compose.yml (${SEAWEEDFS_DATA_DIR:-/opt/volumes/seaweedfs}).
 prepare_seaweedfs_data_dir() {
   set -a
   # shellcheck source=/dev/null
