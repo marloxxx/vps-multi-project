@@ -114,29 +114,29 @@ prompt_stack_options() {
   [[ -f "$ENV_FILE" ]] || return 0
 
   local need_banner=0
-  grep -qE '^START_MINIO=' "$ENV_FILE" || need_banner=1
+  grep -qE '^START_SEAWEEDFS=' "$ENV_FILE" || need_banner=1
   grep -qE '^START_MONITORING=' "$ENV_FILE" || need_banner=1
   if [[ "$need_banner" -eq 1 ]]; then
     echo ""
     echo -e "${BOLD}Optional services${NC}"
-    echo "Choose whether to run MinIO and the monitoring stack (Prometheus + Grafana)."
-    echo "Non-interactive: set START_MINIO and START_MONITORING (0 or 1) in the environment or in .env before setup."
+    echo "Choose whether to run SeaweedFS and the monitoring stack (Prometheus + Grafana)."
+    echo "Non-interactive: set START_SEAWEEDFS and START_MONITORING (0 or 1) in the environment or in .env before setup."
     echo ""
   fi
 
   local ans
-  if ! grep -qE '^START_MINIO=' "$ENV_FILE"; then
-    if [[ -n "${START_MINIO:-}" ]]; then
-      set_or_append_env START_MINIO "$START_MINIO"
+  if ! grep -qE '^START_SEAWEEDFS=' "$ENV_FILE"; then
+    if [[ -n "${START_SEAWEEDFS:-}" ]]; then
+      set_or_append_env START_SEAWEEDFS "$START_SEAWEEDFS"
     elif [[ -t 0 ]]; then
-      read -r -p "Install MinIO (S3-compatible storage)? [Y/n] " ans
+      read -r -p "Install SeaweedFS (S3-compatible storage)? [Y/n] " ans
       if [[ "${ans:-Y}" =~ ^[Nn] ]]; then
-        set_or_append_env START_MINIO "0"
+        set_or_append_env START_SEAWEEDFS "0"
       else
-        set_or_append_env START_MINIO "1"
+        set_or_append_env START_SEAWEEDFS "1"
       fi
     else
-      set_or_append_env START_MINIO "${START_MINIO:-1}"
+      set_or_append_env START_SEAWEEDFS "${START_SEAWEEDFS:-1}"
     fi
   fi
 
@@ -185,12 +185,12 @@ enforce_base_domain_hosts() {
     sed_inplace '/^GRAFANA_HOST=/d' "$ENV_FILE" 2>/dev/null || true
   fi
 
-  if [[ "${START_MINIO:-1}" == "1" ]]; then
-    set_or_append_env MINIO_CONSOLE_HOST "minio.${base_domain}"
-    set_or_append_env MINIO_API_HOST "s3.${base_domain}"
+  if [[ "${START_SEAWEEDFS:-1}" == "1" ]]; then
+    set_or_append_env SEAWEEDFS_ADMIN_HOST "seaweedfs.${base_domain}"
+    set_or_append_env SEAWEEDFS_API_HOST "s3.${base_domain}"
   else
-    sed_inplace '/^MINIO_CONSOLE_HOST=/d' "$ENV_FILE" 2>/dev/null || true
-    sed_inplace '/^MINIO_API_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+    sed_inplace '/^SEAWEEDFS_ADMIN_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+    sed_inplace '/^SEAWEEDFS_API_HOST=/d' "$ENV_FILE" 2>/dev/null || true
   fi
 }
 
@@ -199,7 +199,7 @@ generate_secrets() {
   local need_gen=0
   if [[ "${REGENERATE_SECRETS:-0}" == "1" ]]; then
     need_gen=1
-  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|MINIO_ROOT_PASSWORD=change_me|POSTGRES_PASSWORD=change_me_strong|MYSQL_ROOT_PASSWORD=change_me_mysql|TRAEFIK_DASHBOARD_AUTH=.*change_me' "$ENV_FILE" 2>/dev/null; then
+  elif grep -qE 'change_me|POSTGRES_PASSWORD=change_me|REDIS_PASSWORD=change_me|SEAWEEDFS_SECRET_KEY=change_me|POSTGRES_PASSWORD=change_me_strong|MYSQL_ROOT_PASSWORD=change_me_mysql|TRAEFIK_DASHBOARD_AUTH=.*change_me' "$ENV_FILE" 2>/dev/null; then
     need_gen=1
   elif ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" 2>/dev/null; then
     need_gen=1
@@ -209,13 +209,13 @@ generate_secrets() {
   [[ "$need_gen" -eq 1 ]] || return 0
 
   step "Generating random passwords for .env"
-  local pg redis minio mysql grafana traefik_dash_plain traefik_dash_hash traefik_dash_hash_env
+  local pg redis seaweedfs mysql grafana traefik_dash_plain traefik_dash_hash traefik_dash_hash_env
   pg="$(generate_secret 24 32)"
   redis="$(generate_secret 24 32)"
-  minio="$(generate_secret 24 32)"
+  seaweedfs="$(generate_secret 24 32)"
   sed_inplace "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg}|" "$ENV_FILE"
   sed_inplace "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis}|" "$ENV_FILE"
-  sed_inplace "s|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=${minio}|" "$ENV_FILE"
+  sed_inplace "s|^SEAWEEDFS_SECRET_KEY=.*|SEAWEEDFS_SECRET_KEY=${seaweedfs}|" "$ENV_FILE"
   mysql="$(generate_secret 24 32)"
   if grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE"; then
     sed_inplace "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=${mysql}|" "$ENV_FILE"
@@ -255,11 +255,11 @@ generate_secrets() {
     echo "[Redis]"
     echo "REDIS_PASSWORD=${REDIS_PASSWORD:-$redis}"
     echo ""
-    echo "[MinIO]"
-    echo "MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}"
-    echo "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-$minio}"
-    echo "MINIO_API_HOST=${MINIO_API_HOST:-<not-set>}"
-    echo "MINIO_CONSOLE_HOST=${MINIO_CONSOLE_HOST:-<not-set>}"
+    echo "[SeaweedFS]"
+    echo "SEAWEEDFS_ACCESS_KEY=${SEAWEEDFS_ACCESS_KEY:-seaweedadmin}"
+    echo "SEAWEEDFS_SECRET_KEY=${SEAWEEDFS_SECRET_KEY:-$seaweedfs}"
+    echo "SEAWEEDFS_API_HOST=${SEAWEEDFS_API_HOST:-<not-set>}"
+    echo "SEAWEEDFS_ADMIN_HOST=${SEAWEEDFS_ADMIN_HOST:-<not-set>}"
     if [[ -n "${GRAFANA_HOST:-}" ]]; then
       echo ""
       echo "[Grafana]"
@@ -358,7 +358,7 @@ docker_phase() {
 
   export POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-$OPT_BASE/volumes/postgres}"
   export REDIS_DATA_DIR="${REDIS_DATA_DIR:-$OPT_BASE/volumes/redis}"
-  export MINIO_DATA_DIR="${MINIO_DATA_DIR:-$OPT_BASE/volumes/minio}"
+  export SEAWEEDFS_DATA_DIR="${SEAWEEDFS_DATA_DIR:-$OPT_BASE/volumes/seaweedfs}"
   export BACKUP_DIR="${BACKUP_DIR:-$OPT_BASE/backups/postgres}"
   export PROMETHEUS_DATA_DIR="${PROMETHEUS_DATA_DIR:-$OPT_BASE/volumes/prometheus}"
   export GRAFANA_DATA_DIR="${GRAFANA_DATA_DIR:-$OPT_BASE/volumes/grafana}"
@@ -397,7 +397,7 @@ docker_phase() {
   fi
 
   mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$BACKUP_DIR" "$PORTAINER_DATA_DIR" "$MYSQL_DATA_DIR"
-  [[ "${START_MINIO:-1}" == "1" ]] && mkdir -p "$MINIO_DATA_DIR"
+  [[ "${START_SEAWEEDFS:-1}" == "1" ]] && mkdir -p "$SEAWEEDFS_DATA_DIR"
   [[ "${START_MONITORING:-1}" == "1" ]] && mkdir -p "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR"
 
   step "Starting Traefik + dashboard"
@@ -408,11 +408,11 @@ docker_phase() {
   step "Starting Redis"
   docker compose -f "$ROOT/services/redis/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-  if [[ "${START_MINIO:-1}" == "1" ]]; then
-    step "Starting MinIO"
-    docker compose -f "$ROOT/services/minio/docker-compose.yml" --env-file "$ENV_FILE" up -d
+  if [[ "${START_SEAWEEDFS:-1}" == "1" ]]; then
+    step "Starting SeaweedFS"
+    docker compose -f "$ROOT/services/seaweedfs/docker-compose.yml" --env-file "$ENV_FILE" up -d
   else
-    info "MinIO skipped (START_MINIO=0)"
+    info "SeaweedFS skipped (START_SEAWEEDFS=0)"
   fi
 
   if [[ -f "$ROOT/services/monitoring/docker-compose.yml" && "${START_MONITORING:-1}" == "1" ]] && \
@@ -586,8 +586,8 @@ print_success_summary() {
   echo "  Traefik Dashboard : https://${TRAEFIK_DASHBOARD_HOST:-<not-set>}"
   echo "  Portainer         : https://${PORTAINER_HOST:-<not-set>}"
   echo "  Grafana           : https://${GRAFANA_HOST:-<not-set>}"
-  echo "  MinIO Console     : https://${MINIO_CONSOLE_HOST:-<not-set>}"
-  echo "  MinIO API         : https://${MINIO_API_HOST:-<not-set>}"
+  echo "  SeaweedFS Admin   : https://${SEAWEEDFS_ADMIN_HOST:-<not-set>}"
+  echo "  SeaweedFS S3 API  : https://${SEAWEEDFS_API_HOST:-<not-set>}"
   echo ""
   echo -e "${BOLD}Operations${NC}"
   echo "  SSH Port          : ${ssh_port}"

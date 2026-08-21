@@ -14,8 +14,8 @@ ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required."; exit 1; }
 
-SERVICE_LIST="traefik postgres redis minio monitoring mysql portainer"
-CORE_LIST="traefik postgres redis minio mysql"
+SERVICE_LIST="traefik postgres redis seaweedfs monitoring mysql portainer"
+CORE_LIST="traefik postgres redis seaweedfs mysql"
 LOG_DIR="${STACK_LOG_DIR:-$ROOT/logs}"
 AUDIT_LOG_FILE="${STACK_AUDIT_LOG_FILE:-$LOG_DIR/stackctl.log}"
 PROJECT_CREDS_FILE="${STACK_PROJECT_CREDS_FILE:-$ROOT/.project-db-credentials.txt}"
@@ -84,7 +84,7 @@ service_compose_file() {
     traefik) echo "$ROOT/infra/traefik/docker-compose.yml" ;;
     postgres) echo "$ROOT/services/postgres/docker-compose.yml" ;;
     redis) echo "$ROOT/services/redis/docker-compose.yml" ;;
-    minio) echo "$ROOT/services/minio/docker-compose.yml" ;;
+    seaweedfs) echo "$ROOT/services/seaweedfs/docker-compose.yml" ;;
     monitoring) echo "$ROOT/services/monitoring/docker-compose.yml" ;;
     mysql) echo "$ROOT/services/mysql/docker-compose.yml" ;;
     portainer) echo "$ROOT/services/portainer/docker-compose.yml" ;;
@@ -115,25 +115,25 @@ prepare_mysql_data_dir() {
   mkdir -p "$dir"
 }
 
-# Bind-mounted MinIO data: Docker does not create the host path for driver local + bind.
-prepare_minio_data_dir() {
+# Bind-mounted SeaweedFS data: Docker does not create the host path for driver local + bind.
+prepare_seaweedfs_data_dir() {
   set -a
   # shellcheck source=/dev/null
   source "$ENV_FILE"
   set +a
-  local dir="${MINIO_DATA_DIR:-/opt/volumes/minio}"
+  local dir="${SEAWEEDFS_DATA_DIR:-/opt/volumes/seaweedfs}"
   mkdir -p "$dir"
 }
 
-# Whether MinIO participates in `core` / `all` (start, stop, restart, health, credentials all).
-# Explicit START_MINIO=0|false|no|off → never auto-include.
-# Explicit START_MINIO=1|true|yes|on → always auto-include (compose file must exist).
-# Otherwise → auto: include only if compose exists and API host, console host, root user, and root password are all non-empty (whitespace-stripped).
-# Explicit `stackctl start minio` / `stop minio` is always honoured regardless of this.
-minio_included_in_automated_groups() {
-  local minio_compose
-  minio_compose="$(service_compose_file minio)" || return 1
-  [[ -f "$minio_compose" ]] || return 1
+# Whether SeaweedFS participates in `core` / `all` (start, stop, restart, health, credentials all).
+# Explicit START_SEAWEEDFS=0|false|no|off → never auto-include.
+# Explicit START_SEAWEEDFS=1|true|yes|on → always auto-include (compose file must exist).
+# Otherwise → auto: include only if compose exists and API host, admin host, access key, and secret key are all non-empty (whitespace-stripped).
+# Explicit `stackctl start seaweedfs` / `stop seaweedfs` is always honoured regardless of this.
+seaweedfs_included_in_automated_groups() {
+  local seaweedfs_compose
+  seaweedfs_compose="$(service_compose_file seaweedfs)" || return 1
+  [[ -f "$seaweedfs_compose" ]] || return 1
 
   set -a
   # shellcheck source=/dev/null
@@ -141,19 +141,19 @@ minio_included_in_automated_groups() {
   set +a
 
   local flag
-  flag="$(printf '%s' "${START_MINIO-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  flag="$(printf '%s' "${START_SEAWEEDFS-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 
   case "$flag" in
     0|false|no|off) return 1 ;;
     1|true|yes|on) return 0 ;;
   esac
 
-  local api console user pass
-  api="$(printf '%s' "${MINIO_API_HOST-}" | tr -d '[:space:]')"
-  console="$(printf '%s' "${MINIO_CONSOLE_HOST-}" | tr -d '[:space:]')"
-  user="$(printf '%s' "${MINIO_ROOT_USER-}" | tr -d '[:space:]')"
-  pass="$(printf '%s' "${MINIO_ROOT_PASSWORD-}" | tr -d '[:space:]')"
-  [[ -n "$api" && -n "$console" && -n "$user" && -n "$pass" ]]
+  local api admin access secret
+  api="$(printf '%s' "${SEAWEEDFS_API_HOST-}" | tr -d '[:space:]')"
+  admin="$(printf '%s' "${SEAWEEDFS_ADMIN_HOST-}" | tr -d '[:space:]')"
+  access="$(printf '%s' "${SEAWEEDFS_ACCESS_KEY-}" | tr -d '[:space:]')"
+  secret="$(printf '%s' "${SEAWEEDFS_SECRET_KEY-}" | tr -d '[:space:]')"
+  [[ -n "$api" && -n "$admin" && -n "$access" && -n "$secret" ]]
 }
 
 strip_service_from_list() {
@@ -167,7 +167,7 @@ strip_service_from_list() {
   printf '%s' "$out"
 }
 
-# Echoes the service list for `core` or `all` with MinIO removed when not included by policy.
+# Echoes the service list for `core` or `all` with SeaweedFS removed when not included by policy.
 resolve_stack_group() {
   local group_name="${1:-}"
   local base=""
@@ -179,11 +179,11 @@ resolve_stack_group() {
       return
       ;;
   esac
-  if minio_included_in_automated_groups; then
+  if seaweedfs_included_in_automated_groups; then
     printf '%s' "$base"
     return
   fi
-  strip_service_from_list "$base" minio
+  strip_service_from_list "$base" seaweedfs
 }
 
 compose_run() {
@@ -203,7 +203,7 @@ run_on_group() {
     echo "==> $action $item"
     if [[ "$action" == "up" ]]; then
       [[ "$item" != "mysql" ]] || prepare_mysql_data_dir
-      [[ "$item" != "minio" ]] || prepare_minio_data_dir
+      [[ "$item" != "seaweedfs" ]] || prepare_seaweedfs_data_dir
       compose_run "$item" "$action" -d
     else
       compose_run "$item" "$action"
@@ -230,8 +230,8 @@ start_service() {
       local eff_all
       eff_all="$(resolve_stack_group all)"
       if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
-        echo "Note: MinIO omitted from 'all' (START_MINIO=0 or incomplete MINIO_* in $ENV_FILE). Use: stackctl start minio"
-        audit_log "start all minio=skipped_by_policy"
+        echo "Note: SeaweedFS omitted from 'all' (START_SEAWEEDFS=0 or incomplete SEAWEEDFS_* in $ENV_FILE). Use: stackctl start seaweedfs"
+        audit_log "start all seaweedfs=skipped_by_policy"
       fi
       run_on_group up "$eff_all"
       ;;
@@ -239,8 +239,8 @@ start_service() {
       local eff_core
       eff_core="$(resolve_stack_group core)"
       if [[ "$eff_core" != "$CORE_LIST" ]]; then
-        echo "Note: MinIO omitted from 'core' (START_MINIO=0 or incomplete MINIO_* in $ENV_FILE). Use: stackctl start minio"
-        audit_log "start core minio=skipped_by_policy"
+        echo "Note: SeaweedFS omitted from 'core' (START_SEAWEEDFS=0 or incomplete SEAWEEDFS_* in $ENV_FILE). Use: stackctl start seaweedfs"
+        audit_log "start core seaweedfs=skipped_by_policy"
       fi
       run_on_group up "$eff_core"
       ;;
@@ -248,7 +248,7 @@ start_service() {
       require_compose_file "$target"
       echo "==> starting $target"
       [[ "$target" != "mysql" ]] || prepare_mysql_data_dir
-      [[ "$target" != "minio" ]] || prepare_minio_data_dir
+      [[ "$target" != "seaweedfs" ]] || prepare_seaweedfs_data_dir
       compose_run "$target" up -d
       ;;
   esac
@@ -262,7 +262,7 @@ stop_service() {
       local eff_all
       eff_all="$(resolve_stack_group all)"
       if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
-        audit_log "stop all minio=skipped_by_policy"
+        audit_log "stop all seaweedfs=skipped_by_policy"
       fi
       run_on_group down "$eff_all"
       ;;
@@ -270,7 +270,7 @@ stop_service() {
       local eff_core
       eff_core="$(resolve_stack_group core)"
       if [[ "$eff_core" != "$CORE_LIST" ]]; then
-        audit_log "stop core minio=skipped_by_policy"
+        audit_log "stop core seaweedfs=skipped_by_policy"
       fi
       run_on_group down "$eff_core"
       ;;
@@ -410,11 +410,11 @@ show_credentials() {
       echo ""
       show_credentials redis
       echo ""
-      if minio_included_in_automated_groups; then
-        show_credentials minio
+      if seaweedfs_included_in_automated_groups; then
+        show_credentials seaweedfs
         echo ""
       else
-        echo "[minio] (skipped — not enabled for automated stack; set START_MINIO=1 or full MINIO_* in $ENV_FILE, or: stackctl credentials minio)"
+        echo "[seaweedfs] (skipped — not enabled for automated stack; set START_SEAWEEDFS=1 or full SEAWEEDFS_* in $ENV_FILE, or: stackctl credentials seaweedfs)"
         echo ""
       fi
       show_credentials monitoring
@@ -433,12 +433,12 @@ show_credentials() {
       echo "[redis]"
       print_var REDIS_PASSWORD
       ;;
-    minio)
-      echo "[minio]"
-      print_var MINIO_ROOT_USER
-      print_var MINIO_ROOT_PASSWORD
-      print_var MINIO_API_HOST
-      print_var MINIO_CONSOLE_HOST
+    seaweedfs)
+      echo "[seaweedfs]"
+      print_var SEAWEEDFS_ACCESS_KEY
+      print_var SEAWEEDFS_SECRET_KEY
+      print_var SEAWEEDFS_API_HOST
+      print_var SEAWEEDFS_ADMIN_HOST
       ;;
     monitoring|grafana)
       echo "[monitoring]"
@@ -457,7 +457,7 @@ show_credentials() {
       ;;
     *)
       echo "Unknown credential target: $target"
-      echo "Valid targets: all, postgres, redis, minio, monitoring, mysql, portainer"
+      echo "Valid targets: all, postgres, redis, seaweedfs, monitoring, mysql, portainer"
       return 1
       ;;
   esac
@@ -536,7 +536,7 @@ is_running() {
 check_service_health() {
   local service="$1"
   case "$service" in
-    traefik|minio|portainer)
+    traefik|seaweedfs|portainer)
       if is_running "$service"; then
         echo "OK   $service is running"
       else
@@ -908,7 +908,7 @@ Commands:
   stop [core|all|service]      Stop stack/service (default: core)
   restart [core|all|service]   Restart stack/service (default: core)
   health [core|all|service]    Run basic health checks
-  MinIO (core/all only): START_MINIO=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if MINIO_API_HOST, MINIO_CONSOLE_HOST, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD are all set. Else: stackctl start minio
+  SeaweedFS (core/all only): START_SEAWEEDFS=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if SEAWEEDFS_API_HOST, SEAWEEDFS_ADMIN_HOST, SEAWEEDFS_ACCESS_KEY, SEAWEEDFS_SECRET_KEY are all set. Else: stackctl start seaweedfs
   logs <service>               Follow logs for a service
   backup                       Backup default Postgres database
   backup-all                   Backup all Postgres databases
@@ -1031,7 +1031,7 @@ EOF
         drop_postgres_project "$project" 0
         ;;
       21)
-        read -r -p "Target (all/postgres/redis/minio/monitoring/mysql/portainer) [all]: " target
+        read -r -p "Target (all/postgres/redis/seaweedfs/monitoring/mysql/portainer) [all]: " target
         show_credentials "${target:-all}"
         ;;
       22)

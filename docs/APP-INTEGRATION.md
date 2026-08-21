@@ -1,6 +1,6 @@
 # Integrating a new application with this stack
 
-This guide explains how to attach **new Docker Compose projects** (e.g. Laravel, Node, a custom API) to the shared VPS stack: **Traefik (TLS)**, **Postgres**, **Redis**, **MinIO**, and optional **MySQL**.
+This guide explains how to attach **new Docker Compose projects** (e.g. Laravel, Node, a custom API) to the shared VPS stack: **Traefik (TLS)**, **Postgres**, **Redis**, **SeaweedFS**, and optional **MySQL**.
 
 Assumptions: stack is installed under `/opt/stack` per `README.md` / `setup.sh`, and core services are running (`stackctl start core`).
 
@@ -137,13 +137,13 @@ See **`docs/POSTGRES.md`** for backups and restores.
 
 ---
 
-## 7. MinIO (S3-compatible)
+## 7. SeaweedFS (S3-compatible)
 
-Stack MinIO is already exposed via Traefik (`MINIO_API_HOST`, `MINIO_CONSOLE_HOST`). From **another container on `backend`**, the S3 endpoint is usually:
+Stack SeaweedFS is already exposed via Traefik (`SEAWEEDFS_API_HOST`, `SEAWEEDFS_ADMIN_HOST`). From **another container on `backend`**, the S3 endpoint is usually:
 
-- **`http://minio:9000`** (internal), with `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from `/opt/stack/.env`, **or** a dedicated bucket user you create in MinIO.
+- **`http://seaweedfs:8333`** (internal), with `SEAWEEDFS_ACCESS_KEY` / `SEAWEEDFS_SECRET_KEY` from `/opt/stack/.env`, **or** a dedicated bucket user you create in SeaweedFS Admin / IAM.
 
-For **public** SDKs or browsers, use the **HTTPS hostnames** configured in stack `.env`, not `minio:9000`.
+For **public** SDKs or browsers, use the **HTTPS hostnames** configured in stack `.env`, not `seaweedfs:8333`.
 
 ---
 
@@ -182,7 +182,7 @@ If missing, start the stack: `stackctl start core` (creates external networks vi
 
 ## 10. Security checklist
 
-- Prefer **backend-only** DB access; use **SSH tunnels** or **127.0.0.1** publishes for ad-hoc admin (this stack binds Redis/Postgres/MinIO API to loopback on the host where configured).
+- Prefer **backend-only** DB access; use **SSH tunnels** or **127.0.0.1** publishes for ad-hoc admin (this stack binds Redis/Postgres/SeaweedFS API to loopback on the host where configured).
 - **MySQL** may be published on **0.0.0.0:3306** in this stack for restore/tools — **restrict with firewall** to your IP.
 - Put **Portainer**, **Traefik dashboard**, and UIs behind **strong passwords** and optional **Traefik basic auth** (`docs/SUGGESTIONS.md`).
 

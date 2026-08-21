@@ -13,7 +13,7 @@ chmod +x setup.sh && ./setup.sh
 
 **Interactive:** prompts for **base domain** and **ACME email** if `.env` is missing.
 
-**Automatic:** random passwords for Postgres, MySQL, Redis, MinIO (and Grafana if monitoring is on), plus a detailed service credential summary, written to **`.env`** and **`.setup-credentials.txt`**. A **banner at the end** prints the same – **copy to a password manager, then delete** `.setup-credentials.txt`.
+**Automatic:** random passwords for Postgres, MySQL, Redis, SeaweedFS (and Grafana if monitoring is on), plus a detailed service credential summary, written to **`.env`** and **`.setup-credentials.txt`**. A **banner at the end** prints the same – **copy to a password manager, then delete** `.setup-credentials.txt`.
 Setup also generates Traefik dashboard basic-auth credentials if needed.
 
 **SSH** moves to a **random port (20000–40000)**; `ufw` allows that port plus 80/443 (and 22 until you migrate). Port is in **`.ssh-port`** and in the credentials output.
@@ -21,7 +21,7 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 **CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
 **Docker auto-install:** enabled by default (`AUTO_INSTALL_DOCKER=1`).  
 **Portainer + Traefik dashboard:** required and started during setup.
-**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `minio.<base>`, `s3.<base>`).
+**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `seaweedfs.<base>`, `s3.<base>`).
 
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
@@ -77,10 +77,10 @@ stackctl menu
 
 Service groups:
 
-- `core`: `traefik postgres redis minio mysql` — **MinIO** is started only when it is considered configured (see below); otherwise `stackctl start core` skips it.
-- `all`: `traefik postgres redis minio monitoring mysql portainer` — same MinIO rule as `core`.
+- `core`: `traefik postgres redis seaweedfs mysql` — **SeaweedFS** is started only when it is considered configured (see below); otherwise `stackctl start core` skips it.
+- `all`: `traefik postgres redis seaweedfs monitoring mysql portainer` — same SeaweedFS rule as `core`.
 
-**MinIO and `stackctl`:** with `START_MINIO=0` (or `false` / `no` / `off`), MinIO is never part of `core` / `all`. With `START_MINIO=1` (or `true` / `yes` / `on`), it is always included when the compose file exists. If `START_MINIO` is unset, MinIO is included only when `MINIO_API_HOST`, `MINIO_CONSOLE_HOST`, `MINIO_ROOT_USER`, and `MINIO_ROOT_PASSWORD` are all non-empty. To start MinIO regardless: `stackctl start minio`.
+**SeaweedFS and `stackctl`:** with `START_SEAWEEDFS=0` (or `false` / `no` / `off`), SeaweedFS is never part of `core` / `all`. With `START_SEAWEEDFS=1` (or `true` / `yes` / `on`), it is always included when the compose file exists. If `START_SEAWEEDFS` is unset, SeaweedFS is included only when `SEAWEEDFS_API_HOST`, `SEAWEEDFS_ADMIN_HOST`, `SEAWEEDFS_ACCESS_KEY`, and `SEAWEEDFS_SECRET_KEY` are all non-empty. To start SeaweedFS regardless: `stackctl start seaweedfs`.
 
 Common commands:
 
@@ -126,7 +126,7 @@ Credentials targets:
 ```bash
 stackctl credentials postgres
 stackctl credentials redis
-stackctl credentials minio
+stackctl credentials seaweedfs
 stackctl credentials monitoring
 stackctl credentials mysql
 stackctl credentials portainer

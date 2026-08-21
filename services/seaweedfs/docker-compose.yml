@@ -1,0 +1,52 @@
+# SeaweedFS – S3 API + Admin UI behind Traefik (proxy); 127.0.0.1 for VPS/local clients + data on backend
+# Set SEAWEEDFS_API_HOST / SEAWEEDFS_ADMIN_HOST in root .env
+# Image default CMD: weed mini -dir=/data (master + volume + filer + S3 + Admin)
+
+services:
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: seaweedfs
+    restart: unless-stopped
+    environment:
+      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY}
+    volumes:
+      - seaweedfs_data:/data
+    # Loopback: S3 API 8333, Admin UI 23646 — or ssh -L 8333:127.0.0.1:8333 -L 23646:127.0.0.1:23646 user@vps
+    ports:
+      - "127.0.0.1:8333:8333"
+      - "127.0.0.1:23646:23646"
+    networks:
+      - backend
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      # tls=true: explicit TLS on websecure; use with file-loaded certs when certresolver lines are removed.
+      # S3 API
+      - "traefik.http.routers.seaweedfs-api.rule=Host(`${SEAWEEDFS_API_HOST}`)"
+      - "traefik.http.routers.seaweedfs-api.entrypoints=websecure"
+      - "traefik.http.routers.seaweedfs-api.tls=true"
+      - "traefik.http.routers.seaweedfs-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.seaweedfs-api.service=seaweedfs-s3"
+      - "traefik.http.services.seaweedfs-s3.loadbalancer.server.port=8333"
+      # Admin UI
+      - "traefik.http.routers.seaweedfs-admin.rule=Host(`${SEAWEEDFS_ADMIN_HOST}`)"
+      - "traefik.http.routers.seaweedfs-admin.entrypoints=websecure"
+      - "traefik.http.routers.seaweedfs-admin.tls=true"
+      - "traefik.http.routers.seaweedfs-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.seaweedfs-admin.service=seaweedfs-admin-svc"
+      - "traefik.http.services.seaweedfs-admin-svc.loadbalancer.server.port=23646"
+
+volumes:
+  seaweedfs_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${SEAWEEDFS_DATA_DIR:-./data}
+
+networks:
+  backend:
+    external: true
+  proxy:
+    external: true

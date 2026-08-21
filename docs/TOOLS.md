@@ -7,7 +7,7 @@ Self-hosted only; no paid licence required for the editions below.
 | Portainer CE | Free |
 | Prometheus / Grafana OSS / cAdvisor | Free |
 | Traefik | MIT |
-| PostgreSQL / Redis / MinIO | OSS |
+| PostgreSQL / Redis / SeaweedFS | OSS |
 
 ---
 
