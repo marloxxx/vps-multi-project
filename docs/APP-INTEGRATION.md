@@ -50,7 +50,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.myapp.rule=Host(`app.example.com`)"
       - "traefik.http.routers.myapp.entrypoints=websecure"
-      - "traefik.http.routers.myapp.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.myapp.tls=true"
       - "traefik.http.services.myapp.loadbalancer.server.port=3000"
 
 networks:
@@ -60,8 +60,8 @@ networks:
 
 **Notes:**
 
-- First HTTPS request to that host triggers **Let’s Encrypt HTTP-01** (port **80** must reach Traefik — already mapped in this stack).
-- See **`docs/TRAEFIK.md`** for multiple hosts, wildcards (DNS-01), and middlewares.
+- TLS uses the **file-loaded PEM** on Traefik (wildcard/SAN). Hostname must match the certificate. Do **not** add `tls.certresolver=letsencrypt` unless that host should use ACME.
+- See **`docs/TRAEFIK.md`** for PEM layout, multiple hosts, and optional Let’s Encrypt.
 
 ---
 

@@ -34,9 +34,10 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
+      # TLS: file-loaded PEM (stack default). Do not set tls.certresolver=letsencrypt.
       - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)"
       - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grafana.tls=true"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
       # Optional: basic auth in front of Grafana (htpasswd -> GRAFANA_TRAEFIK_AUTH)
       # - "traefik.http.routers.grafana.middlewares=grafana-auth"

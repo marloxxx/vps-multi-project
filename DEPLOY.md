@@ -54,4 +54,4 @@ docker compose -f infra/traefik/docker-compose.yml \
   -f infra/traefik/docker-compose.dashboard.yml --env-file .env up -d
 ```
 
-Public apps need **`traefik.http.routers.<name>.tls.certresolver=letsencrypt`** on `websecure` (see `docs/APP-INTEGRATION.md`). Port **80** must reach Traefik for HTTP-01.
+Public apps use **`entrypoints=websecure`** and **`tls=true`** (file-loaded PEM). Do **not** set **`tls.certresolver=letsencrypt`** unless that hostname should use ACME. See `docs/APP-INTEGRATION.md` and `docs/TRAEFIK.md`.

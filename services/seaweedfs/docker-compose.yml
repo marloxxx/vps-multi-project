@@ -21,19 +21,17 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      # tls=true: explicit TLS on websecure; use with file-loaded certs when certresolver lines are removed.
+      # TLS: file-loaded PEM (stack default). Do not set tls.certresolver=letsencrypt.
       # S3 API
       - "traefik.http.routers.seaweedfs-api.rule=Host(`${SEAWEEDFS_API_HOST}`)"
       - "traefik.http.routers.seaweedfs-api.entrypoints=websecure"
       - "traefik.http.routers.seaweedfs-api.tls=true"
-      - "traefik.http.routers.seaweedfs-api.tls.certresolver=letsencrypt"
       - "traefik.http.routers.seaweedfs-api.service=seaweedfs-s3"
       - "traefik.http.services.seaweedfs-s3.loadbalancer.server.port=8333"
       # Admin UI
       - "traefik.http.routers.seaweedfs-admin.rule=Host(`${SEAWEEDFS_ADMIN_HOST}`)"
       - "traefik.http.routers.seaweedfs-admin.entrypoints=websecure"
       - "traefik.http.routers.seaweedfs-admin.tls=true"
-      - "traefik.http.routers.seaweedfs-admin.tls.certresolver=letsencrypt"
       - "traefik.http.routers.seaweedfs-admin.service=seaweedfs-admin-svc"
       - "traefik.http.services.seaweedfs-admin-svc.loadbalancer.server.port=23646"
 

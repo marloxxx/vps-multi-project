@@ -1,5 +1,6 @@
-# Traefik static configuration (Docker provider via compose labels; TLS via Let’s Encrypt resolver below).
-# Docs: https://doc.traefik.io/traefik/
+# Traefik static configuration (Docker provider via compose labels).
+# TLS default: file-loaded PEM via providers.file on the server (docs/TRAEFIK.md).
+# Do not set certificatesResolvers.letsencrypt unless a router explicitly needs ACME.
 #
 # Layered Traefik (edge A → this instance B): `web` (:80) is plain HTTP (no forced HTTPS redirect).
 # HTTPS remains on `websecure` (:443) for routers that use TLS. For east-west checks without TLS,
@@ -29,13 +30,15 @@ providers:
     exposedByDefault: false
     network: proxy
 
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      # email set via compose command from .env (ACME_EMAIL)
-      storage: /letsencrypt/acme.json
-      httpChallenge:
-        entryPoint: web
+# Optional Let's Encrypt — leave commented. Enabling this plus a router
+# tls.certresolver=letsencrypt label will ACME that Host (needs public DNS).
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: set-via-compose-if-you-enable-this
+#       storage: /letsencrypt/acme.json
+#       httpChallenge:
+#         entryPoint: web
 
 log:
   level: INFO

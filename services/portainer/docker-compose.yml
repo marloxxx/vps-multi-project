@@ -20,10 +20,11 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
+      # TLS: file-loaded PEM (stack default). Do not set tls.certresolver=letsencrypt.
       - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
       # For layered Traefik (edge → this node on HTTP): use websecure,internal and upstream http://<ip>:8080; preserve Host.
       - "traefik.http.routers.portainer.entrypoints=websecure"
-      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.portainer.tls=true"
       - "traefik.http.services.portainer.loadbalancer.server.port=9000"
       # Strongly recommended: basic auth in front (htpasswd → PORTAINER_TRAEFIK_AUTH)
       # - "traefik.http.routers.portainer.middlewares=portainer-auth"

@@ -11,45 +11,29 @@ labels:
   - "traefik.enable=true"
   - "traefik.http.routers.myapp.rule=Host(`app.example.com`) || Host(`www.example.com`)"
   - "traefik.http.routers.myapp.entrypoints=websecure"
-  - "traefik.http.routers.myapp.tls.certresolver=letsencrypt"
+  - "traefik.http.routers.myapp.tls=true"
   - "traefik.http.services.myapp.loadbalancer.server.port=3000"
 ```
 
-Let’s Encrypt **HTTP-01**: one cert per hostname when first requested. Each hostname must **resolve to this server** (A/AAAA).
+TLS is terminated by Traefik from **file-loaded PEM** (wildcard/SAN). The hostname must appear on that certificate.
 
 **Several projects** = several compose files, each with its own `Host(...)`.
 
 ---
 
-## TLS in this stack (Let’s Encrypt)
+## TLS in this stack (file PEM)
 
-1. **`/opt/stack/.env`:** `ACME_EMAIL` set (used by Traefik’s ACME resolver in `infra/traefik/traefik.yml`).
-2. **Traefik:** `docker-compose.yml` + `docker-compose.dashboard.yml` (same as `setup.sh` / `stackctl`).
-3. **App container:** **`proxy`** network; labels with `entrypoints=websecure` and **`tls.certresolver=letsencrypt`** (see block at top of this page).
-4. **DNS:** hostname → this server; **port 80** must reach Traefik for HTTP-01.
+Default for **all** public routers: `websecure` + `tls=true`, **no** `tls.certresolver`. Traefik then uses the PEM from the file provider. Adding `certresolver=letsencrypt` makes Traefik request a Let’s Encrypt cert for that Host — that fails with NXDOMAIN if the name has no public DNS.
 
-First HTTPS request to that host triggers issuance (or reuse from `acme.json`).
+1. Mount certs + dynamic YAML into Traefik (server layout below).
+2. App container on **`proxy`**, labels as in the block above.
+3. DNS A/AAAA is still required for browsers; it is **not** required for ACME if you are not using Let’s Encrypt.
 
-### Custom PEM certificates (advanced, not wired in repo)
+### PEM layout (e.g. Sectigo / wildcard)
 
-To terminate TLS with your own PEM files, extend **`infra/traefik/docker-compose.yml`** and **`traefik.yml`**: add bind mounts for certificates and a dynamic directory, enable Traefik’s **`providers.file`**, and supply `tls.certificates` YAML (shape: `infra/traefik/dynamic/tls-certificates.example.yml`). Routers using that cert must **not** set `tls.certresolver=letsencrypt` for the same host.
-
-#### Commercial CA (e.g. Sectigo)
-
-Sectigo (and similar vendors) give you **normal PEM** material: a **server certificate**, one or more **intermediate** certificates, and a **private key** (often `yourdomain.crt`, `CA_bundle.crt`, `yourdomain.key` — names vary).
-
-1. **Build a full chain** Traefik can send to clients: concatenate **leaf first**, then intermediates (same idea as “fullchain” for Let’s Encrypt), e.g.  
-   `cat yourdomain.crt Sectigo_intermediate.crt > fullchain.pem`  
-   (use whatever filenames Sectigo supplied; order is **leaf → intermediates**.)
-2. **Private key** only in a separate file, e.g. `key.pem` (permissions **600** on the host).
-3. Mount that directory into the Traefik container (e.g. read-only **`/certs`**) and point **`tls.certificates`** at **`/certs/fullchain.pem`** and **`/certs/key.pem`** (see `tls-certificates.example.yml` — adjust paths if you mount elsewhere).
-4. On the **service** behind Traefik, use **`websecure`** and the correct **`Host(...)`**, and **omit** **`tls.certresolver=letsencrypt`** for hostnames that must use the Sectigo cert.
-
-Browsers trust the site when the **chain** includes all intermediates up to a **public root** already in the trust store (Sectigo’s docs list which intermediate to use). Wrong or missing intermediates cause “certificate not trusted” even with a valid Sectigo leaf.
-
-#### Example: host layout `/opt/ssl/ptsi/` and bind mounts
-
-Keep **PEM files** and **YAML** in separate host folders so Traefik’s file provider only reads config files (not `.pem` blobs).
+1. Full chain: **leaf first**, then intermediates → `fullchain.pem`.
+2. Private key → `key.pem` (host mode **600**).
+3. YAML for Traefik file provider (`infra/traefik/dynamic/tls-certificates.example.yml`).
 
 **On the server:**
 
@@ -59,8 +43,6 @@ Keep **PEM files** and **YAML** in separate host folders so Traefik’s file pro
 /opt/ssl/ptsi/dynamic/tls-certificates.yml
 ```
 
-`tls-certificates.yml` should reference **container** paths (after mounts), e.g.:
-
 ```yaml
 tls:
   certificates:
@@ -68,14 +50,14 @@ tls:
       keyFile: /certs/key.pem
 ```
 
-**1. `infra/traefik/docker-compose.yml`** — under `traefik.volumes`, add (keep existing lines):
+**`infra/traefik/docker-compose.yml`** volumes:
 
 ```yaml
       - /opt/ssl/ptsi/certs:/certs:ro
       - /opt/ssl/ptsi/dynamic:/etc/traefik/dynamic-ssl:ro
 ```
 
-**2. `infra/traefik/traefik.yml`** — under `providers:`, add a **`file`** provider beside **`docker`** (pick a directory name that matches the mount above):
+**`infra/traefik/traefik.yml`** providers:
 
 ```yaml
 providers:
@@ -88,46 +70,30 @@ providers:
     watch: true
 ```
 
-**3.** Recreate Traefik, e.g. from `/opt/stack/infra/traefik`:
+Recreate Traefik after changing static config:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dashboard.yml \
   --env-file /opt/stack/.env up -d --force-recreate traefik
 ```
 
-**4. Labels on your app service** — attach the container to **`proxy`**, then use **`websecure`** and a **`Host(...)`** rule that matches a name on the certificate. **Do not** set **`tls.certresolver=letsencrypt`** on routers that should use the file-loaded PEM (otherwise Traefik tries ACME for that router).
+### Optional: Let’s Encrypt on a specific host
 
-Minimal example (custom PEM / Sectigo, hostname must match cert SANs):
-
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.myapp.rule=Host(`app.example.com`)"
-  - "traefik.http.routers.myapp.entrypoints=websecure"
-  - "traefik.http.services.myapp.loadbalancer.server.port=3000"
-```
-
-Compare with **Let’s Encrypt** on the same stack (only difference: the **`certresolver`** line):
+The ACME resolver remains in Traefik. **Only** on that router add:
 
 ```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.myapp.rule=Host(`app.example.com`)"
-  - "traefik.http.routers.myapp.entrypoints=websecure"
   - "traefik.http.routers.myapp.tls.certresolver=letsencrypt"
-  - "traefik.http.services.myapp.loadbalancer.server.port=3000"
 ```
 
-You do **not** need `traefik.http.routers.myapp.tls=true` when using `websecure` — TLS is implied for that entrypoint. If you use **both** ACME and file certs on one Traefik, use **different router names** and only add **`certresolver`** on hosts that should use Let’s Encrypt.
+That host must have public DNS (A/AAAA) and port **80** must reach Traefik (HTTP-01). Do not set `certresolver` on routers that should use the file PEM.
 
 ---
 
 ## Wildcard subdomain (`*.example.com`)
 
-**HTTP-01 cannot issue wildcard certs.** Options:
+File PEM already covers `*.example.com` if that SAN is on the certificate. HTTP-01 cannot issue wildcards.
 
-1. **Per-host certs** – first request to `sub1.example.com` gets a cert; no wildcard needed.
-2. **Wildcard cert** – **DNS-01** only. Add a second ACME resolver in `traefik.yml` (e.g. Cloudflare API token), then on the service:
+Optional ACME wildcard (DNS-01):
 
 ```yaml
 labels:
@@ -145,17 +111,6 @@ labels:
 
 **File provider** – mount a directory into Traefik and drop YAML files; `watch: true` reloads on change.
 
-**traefik.yml:**
-
-```yaml
-providers:
-  file:
-    directory: /etc/traefik/dynamic
-    watch: true
-```
-
-Mount `infra/traefik/dynamic/` into the container at `/etc/traefik/dynamic`. Example router pointing at a container on the `proxy` network:
-
 ```yaml
 http:
   routers:
@@ -163,8 +118,7 @@ http:
       rule: Host(`other.example.com`)
       entryPoints: [websecure]
       service: my-service
-      tls:
-        certResolver: letsencrypt
+      tls: {}
   services:
     my-service:
       loadBalancer:
@@ -181,8 +135,8 @@ Replace `container_name` with the Docker DNS name of the target container.
 | Need | Config |
 |------|--------|
 | Several domains, one backend | `Host(a) \|\| Host(b)` in one router |
-| Many subdomains, no wildcard TLS | `HostRegexp(...)` + HTTP-01 per host |
-| `*.domain.com` one cert | DNS-01 resolver + `tls.domains` sans |
+| TLS for stack + apps | `websecure` + `tls=true`, file PEM, **no** certresolver |
+| One host on Let’s Encrypt | add `tls.certresolver=letsencrypt` on that router only |
 | Dynamic host list | File provider + generated YAML |
 
 Static config: `infra/traefik/traefik.yml`. Compose: `infra/traefik/docker-compose.yml`.
