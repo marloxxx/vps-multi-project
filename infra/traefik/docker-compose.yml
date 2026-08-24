@@ -1,15 +1,17 @@
 # Traefik reverse proxy – attach all public apps to network "proxy"
 # Load root .env from repo root: docker compose --env-file ../../.env up -d
 #
-# TLS default: file-loaded PEM (see docs/TRAEFIK.md). Do not pass
-# --certificatesresolvers.letsencrypt.* here — that registers ACME and any
-# leftover tls.certresolver=letsencrypt label will hit Let's Encrypt.
+# ACME resolver stays registered so older app compose files that still set
+# tls.certresolver=letsencrypt keep routing. Stack services use file PEM
+# (tls=true only). Strip the certresolver label from apps when you can.
 
 services:
   traefik:
     image: traefik:v3.6
     container_name: traefik
     restart: unless-stopped
+    command:
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
     security_opt:
       - no-new-privileges:true
     ports:
