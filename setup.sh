@@ -66,6 +66,15 @@ set_or_append_env() {
   fi
 }
 
+is_truthy_flag() {
+  local flag
+  flag="$(printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$flag" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ---------- ensure .env ----------
 ensure_env() {
   if [[ -f "$ENV_FILE" ]]; then
@@ -116,11 +125,13 @@ prompt_stack_options() {
   local need_banner=0
   grep -qE '^START_SEAWEEDFS=' "$ENV_FILE" || need_banner=1
   grep -qE '^START_MONITORING=' "$ENV_FILE" || need_banner=1
+  grep -qE '^START_9ROUTER=' "$ENV_FILE" || need_banner=1
   if [[ "$need_banner" -eq 1 ]]; then
     echo ""
     echo -e "${BOLD}Optional services${NC}"
-    echo "Choose whether to run SeaweedFS and the monitoring stack (Prometheus + Grafana)."
-    echo "Non-interactive: set START_SEAWEEDFS and START_MONITORING (0 or 1) in the environment or in .env before setup."
+    echo "Choose whether to run SeaweedFS, monitoring (Prometheus + Grafana), and 9Router."
+    echo "9Router is opt-in and is not installed unless you enable it."
+    echo "Non-interactive: set START_SEAWEEDFS, START_MONITORING, and START_9ROUTER (0 or 1) in the environment or in .env before setup."
     echo ""
   fi
 
@@ -152,6 +163,21 @@ prompt_stack_options() {
       fi
     else
       set_or_append_env START_MONITORING "${START_MONITORING:-1}"
+    fi
+  fi
+
+  if ! grep -qE '^START_9ROUTER=' "$ENV_FILE"; then
+    if [[ -n "${START_9ROUTER:-}" ]]; then
+      set_or_append_env START_9ROUTER "$START_9ROUTER"
+    elif [[ -t 0 ]]; then
+      read -r -p "Install 9Router (optional AI gateway for Claude/Codex/Cursor)? [y/N] " ans
+      if [[ "${ans:-}" =~ ^[Yy] ]]; then
+        set_or_append_env START_9ROUTER "1"
+      else
+        set_or_append_env START_9ROUTER "0"
+      fi
+    else
+      set_or_append_env START_9ROUTER "${START_9ROUTER:-0}"
     fi
   fi
 
@@ -192,6 +218,49 @@ enforce_base_domain_hosts() {
     sed_inplace '/^SEAWEEDFS_ADMIN_HOST=/d' "$ENV_FILE" 2>/dev/null || true
     sed_inplace '/^SEAWEEDFS_API_HOST=/d' "$ENV_FILE" 2>/dev/null || true
   fi
+
+  if is_truthy_flag "${START_9ROUTER:-0}"; then
+    set_or_append_env NINEROUTER_HOST "9router.${base_domain}"
+    set_or_append_env NINEROUTER_DATA_DIR "${OPT_BASE}/volumes/9router"
+  else
+    sed_inplace '/^NINEROUTER_HOST=/d' "$ENV_FILE" 2>/dev/null || true
+  fi
+}
+
+# Fill 9Router secrets in .env when START_9ROUTER is enabled. Sets ninerouter_generated=1 if it wrote anything.
+ensure_ninerouter_secrets() {
+  ninerouter_generated=0
+  grep -qE '^START_9ROUTER=' "$ENV_FILE" 2>/dev/null || return 0
+  load_env
+  is_truthy_flag "${START_9ROUTER:-0}" || return 0
+
+  local pw jwt api salt force=0
+  [[ "${REGENERATE_SECRETS:-0}" == "1" ]] && force=1
+
+  if [[ "$force" -eq 1 ]] || ! grep -q '^NINEROUTER_INITIAL_PASSWORD=' "$ENV_FILE" || \
+     grep -qE '^NINEROUTER_INITIAL_PASSWORD=$|^NINEROUTER_INITIAL_PASSWORD=.*change_me' "$ENV_FILE"; then
+    pw="$(generate_secret 18 24)"
+    set_or_append_env NINEROUTER_INITIAL_PASSWORD "$pw"
+    ninerouter_generated=1
+  fi
+  if [[ "$force" -eq 1 ]] || ! grep -q '^NINEROUTER_JWT_SECRET=' "$ENV_FILE" || \
+     grep -qE '^NINEROUTER_JWT_SECRET=$|^NINEROUTER_JWT_SECRET=.*change_me' "$ENV_FILE"; then
+    jwt="$(generate_secret 32 48)"
+    set_or_append_env NINEROUTER_JWT_SECRET "$jwt"
+    ninerouter_generated=1
+  fi
+  if [[ "$force" -eq 1 ]] || ! grep -q '^NINEROUTER_API_KEY_SECRET=' "$ENV_FILE" || \
+     grep -qE '^NINEROUTER_API_KEY_SECRET=$|^NINEROUTER_API_KEY_SECRET=.*change_me' "$ENV_FILE"; then
+    api="$(generate_secret 24 32)"
+    set_or_append_env NINEROUTER_API_KEY_SECRET "$api"
+    ninerouter_generated=1
+  fi
+  if [[ "$force" -eq 1 ]] || ! grep -q '^NINEROUTER_MACHINE_ID_SALT=' "$ENV_FILE" || \
+     grep -qE '^NINEROUTER_MACHINE_ID_SALT=$|^NINEROUTER_MACHINE_ID_SALT=.*change_me' "$ENV_FILE"; then
+    salt="$(generate_secret 24 32)"
+    set_or_append_env NINEROUTER_MACHINE_ID_SALT "$salt"
+    ninerouter_generated=1
+  fi
 }
 
 # ---------- generate secrets into .env + stash for final print ----------
@@ -206,37 +275,44 @@ generate_secrets() {
   elif ! grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
     need_gen=1
   fi
-  [[ "$need_gen" -eq 1 ]] || return 0
 
-  step "Generating random passwords for .env"
+  ensure_ninerouter_secrets
+
+  [[ "$need_gen" -eq 1 || "${ninerouter_generated:-0}" -eq 1 ]] || return 0
+
   local pg redis seaweedfs mysql grafana traefik_dash_plain traefik_dash_hash traefik_dash_hash_env
-  pg="$(generate_secret 24 32)"
-  redis="$(generate_secret 24 32)"
-  seaweedfs="$(generate_secret 24 32)"
-  sed_inplace "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg}|" "$ENV_FILE"
-  sed_inplace "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis}|" "$ENV_FILE"
-  sed_inplace "s|^SEAWEEDFS_SECRET_KEY=.*|SEAWEEDFS_SECRET_KEY=${seaweedfs}|" "$ENV_FILE"
-  mysql="$(generate_secret 24 32)"
-  if grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE"; then
-    sed_inplace "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=${mysql}|" "$ENV_FILE"
-  else
-    echo "MYSQL_ROOT_PASSWORD=${mysql}" >> "$ENV_FILE"
-  fi
-  if grep -q '^GRAFANA_HOST=' "$ENV_FILE"; then
-    grafana="$(generate_secret 24 32)"
-    if grep -q '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE"; then
-      sed_inplace "s|^GRAFANA_ADMIN_PASSWORD=.*|GRAFANA_ADMIN_PASSWORD=${grafana}|" "$ENV_FILE"
+  if [[ "$need_gen" -eq 1 ]]; then
+    step "Generating random passwords for .env"
+    pg="$(generate_secret 24 32)"
+    redis="$(generate_secret 24 32)"
+    seaweedfs="$(generate_secret 24 32)"
+    sed_inplace "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg}|" "$ENV_FILE"
+    sed_inplace "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis}|" "$ENV_FILE"
+    sed_inplace "s|^SEAWEEDFS_SECRET_KEY=.*|SEAWEEDFS_SECRET_KEY=${seaweedfs}|" "$ENV_FILE"
+    mysql="$(generate_secret 24 32)"
+    if grep -q '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE"; then
+      sed_inplace "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=${mysql}|" "$ENV_FILE"
     else
-      echo "GRAFANA_ADMIN_PASSWORD=${grafana}" >> "$ENV_FILE"
+      echo "MYSQL_ROOT_PASSWORD=${mysql}" >> "$ENV_FILE"
     fi
-  fi
-  if ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" || grep -qE '^TRAEFIK_DASHBOARD_AUTH=$|^TRAEFIK_DASHBOARD_AUTH=.*change_me.*' "$ENV_FILE"; then
-    traefik_dash_plain="$(generate_secret 18 24)"
-    traefik_dash_hash="$(openssl passwd -apr1 "$traefik_dash_plain")"
-    # .env is sourced by bash; '$' in htpasswd hash must be escaped.
-    traefik_dash_hash_env="${traefik_dash_hash//\$/\$\$}"
-    sed_inplace "/^TRAEFIK_DASHBOARD_AUTH=/d" "$ENV_FILE"
-    echo "TRAEFIK_DASHBOARD_AUTH=admin:${traefik_dash_hash_env}" >> "$ENV_FILE"
+    if grep -q '^GRAFANA_HOST=' "$ENV_FILE"; then
+      grafana="$(generate_secret 24 32)"
+      if grep -q '^GRAFANA_ADMIN_PASSWORD=' "$ENV_FILE"; then
+        sed_inplace "s|^GRAFANA_ADMIN_PASSWORD=.*|GRAFANA_ADMIN_PASSWORD=${grafana}|" "$ENV_FILE"
+      else
+        echo "GRAFANA_ADMIN_PASSWORD=${grafana}" >> "$ENV_FILE"
+      fi
+    fi
+    if ! grep -q '^TRAEFIK_DASHBOARD_AUTH=' "$ENV_FILE" || grep -qE '^TRAEFIK_DASHBOARD_AUTH=$|^TRAEFIK_DASHBOARD_AUTH=.*change_me.*' "$ENV_FILE"; then
+      traefik_dash_plain="$(generate_secret 18 24)"
+      traefik_dash_hash="$(openssl passwd -apr1 "$traefik_dash_plain")"
+      # .env is sourced by bash; '$' in htpasswd hash must be escaped.
+      traefik_dash_hash_env="${traefik_dash_hash//\$/\$\$}"
+      sed_inplace "/^TRAEFIK_DASHBOARD_AUTH=/d" "$ENV_FILE"
+      echo "TRAEFIK_DASHBOARD_AUTH=admin:${traefik_dash_hash_env}" >> "$ENV_FILE"
+    fi
+  elif [[ "${ninerouter_generated:-0}" -eq 1 ]]; then
+    step "Generating 9Router secrets for .env"
   fi
   load_env
   # Stash detailed credentials file (no SSH port yet)
@@ -282,6 +358,13 @@ generate_secrets() {
       echo "PORTAINER_HOST=${PORTAINER_HOST}"
       echo "PORTAINER_NOTE=Create admin user on first login"
       echo "PORTAINER_TRAEFIK_AUTH=${PORTAINER_TRAEFIK_AUTH:-<not-set>}"
+    fi
+    if is_truthy_flag "${START_9ROUTER:-0}"; then
+      echo ""
+      echo "[9Router]"
+      echo "NINEROUTER_HOST=${NINEROUTER_HOST:-<not-set>}"
+      echo "NINEROUTER_INITIAL_PASSWORD=${NINEROUTER_INITIAL_PASSWORD:-<not-set>}"
+      echo "NINEROUTER_NOTE=First-login dashboard password (ignored after hash is stored). API keys are created in the dashboard."
     fi
   } > "$CREDENTIALS_FILE"
   chmod 600 "$CREDENTIALS_FILE"
@@ -364,6 +447,7 @@ docker_phase() {
   export GRAFANA_DATA_DIR="${GRAFANA_DATA_DIR:-$OPT_BASE/volumes/grafana}"
   export PORTAINER_DATA_DIR="${PORTAINER_DATA_DIR:-$OPT_BASE/volumes/portainer}"
   export MYSQL_DATA_DIR="${MYSQL_DATA_DIR:-$OPT_BASE/volumes/mysql}"
+  export NINEROUTER_DATA_DIR="${NINEROUTER_DATA_DIR:-$OPT_BASE/volumes/9router}"
 
   # Portainer + Traefik dashboard are mandatory in this stack.
   if ! grep -q '^PORTAINER_HOST=' "$ENV_FILE"; then
@@ -399,6 +483,7 @@ docker_phase() {
   mkdir -p "$POSTGRES_DATA_DIR" "$REDIS_DATA_DIR" "$BACKUP_DIR" "$PORTAINER_DATA_DIR" "$MYSQL_DATA_DIR"
   [[ "${START_SEAWEEDFS:-1}" == "1" ]] && mkdir -p "$SEAWEEDFS_DATA_DIR"
   [[ "${START_MONITORING:-1}" == "1" ]] && mkdir -p "$PROMETHEUS_DATA_DIR" "$GRAFANA_DATA_DIR"
+  is_truthy_flag "${START_9ROUTER:-0}" && mkdir -p "$NINEROUTER_DATA_DIR"
 
   step "Starting Traefik + dashboard"
   docker compose -f "$ROOT/infra/traefik/docker-compose.yml" -f "$ROOT/infra/traefik/docker-compose.dashboard.yml" \
@@ -433,6 +518,17 @@ docker_phase() {
   else
     echo "Missing required compose file: $ROOT/services/portainer/docker-compose.yml"
     exit 1
+  fi
+
+  if [[ -f "$ROOT/services/9router/docker-compose.yml" ]] && is_truthy_flag "${START_9ROUTER:-0}"; then
+    if grep -q '^NINEROUTER_HOST=' "$ENV_FILE" && [[ -n "${NINEROUTER_HOST:-}" ]]; then
+      step "Starting 9Router"
+      docker compose -f "$ROOT/services/9router/docker-compose.yml" --env-file "$ENV_FILE" up -d
+    else
+      info "9Router skipped (set NINEROUTER_HOST in .env and START_9ROUTER=1 to enable)"
+    fi
+  else
+    info "9Router skipped (optional — START_9ROUTER=0). Enable later with START_9ROUTER=1 or: stackctl start 9router"
   fi
 
 }
@@ -588,6 +684,10 @@ print_success_summary() {
   echo "  Grafana           : https://${GRAFANA_HOST:-<not-set>}"
   echo "  SeaweedFS Admin   : https://${SEAWEEDFS_ADMIN_HOST:-<not-set>}"
   echo "  SeaweedFS S3 API  : https://${SEAWEEDFS_API_HOST:-<not-set>}"
+  if [[ -n "${NINEROUTER_HOST:-}" ]]; then
+    echo "  9Router Dashboard : https://${NINEROUTER_HOST}"
+    echo "  9Router API       : https://${NINEROUTER_HOST}/v1"
+  fi
   echo ""
   echo -e "${BOLD}Operations${NC}"
   echo "  SSH Port          : ${ssh_port}"

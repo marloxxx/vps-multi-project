@@ -8,6 +8,7 @@ Self-hosted only; no paid licence required for the editions below.
 | Prometheus / Grafana OSS / cAdvisor | Free |
 | Traefik | MIT |
 | PostgreSQL / Redis / SeaweedFS | OSS |
+| 9Router (optional) | MIT |
 
 ---
 
@@ -33,6 +34,24 @@ docker compose -f services/monitoring/docker-compose.yml --env-file .env up -d
 
 Grafana -> Prometheus data source `http://prometheus:9090`. Dashboard IDs **193** / **14282**.
 
+---
+
+## 9Router (optional AI gateway)
+
+Not started by default. Full guide: **`docs/9ROUTER.md`**.
+
+```bash
+# First-time: answer yes at setup, or:
+START_9ROUTER=1 ./setup.sh
+
+# Existing stack:
+# set START_9ROUTER=1, NINEROUTER_HOST, NINEROUTER_* secrets in .env
+mkdir -p /opt/volumes/9router
+stackctl start 9router
+```
+
+`.env`: `NINEROUTER_HOST=9router.example.com`. Dashboard at `https://$NINEROUTER_HOST`; API at `https://$NINEROUTER_HOST/v1`.
+
 ## Other (not in compose)
 
 | Tool | Use |
@@ -48,4 +67,5 @@ Grafana -> Prometheus data source `http://prometheus:9090`. Dashboard IDs **193*
 
 - **UI:** `services/portainer/`
 - **Metrics:** `services/monitoring/`
+- **9Router (opt-in):** `services/9router/`
 - **Backups:** `stackctl auto-backup` → dumps + optional Google Drive via rclone (`BACKUP_RCLONE_REMOTE`)

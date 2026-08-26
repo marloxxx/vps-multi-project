@@ -1,6 +1,6 @@
 # Integrating a new application with this stack
 
-This guide explains how to attach **new Docker Compose projects** (e.g. Laravel, Node, a custom API) to the shared VPS stack: **Traefik (TLS)**, **Postgres**, **Redis**, **SeaweedFS**, and optional **MySQL**.
+This guide explains how to attach **new Docker Compose projects** (e.g. Laravel, Node, a custom API) to the shared VPS stack: **Traefik (TLS)**, **Postgres**, **Redis**, **SeaweedFS**, optional **MySQL**, and optional **9Router**.
 
 Assumptions: stack is installed under `/opt/stack` per `README.md` / `setup.sh`, and core services are running (`stackctl start core`).
 
@@ -74,6 +74,7 @@ Attach the **application** containers (not the databases) to **`backend`** and u
 | PostgreSQL | `postgres`     | `DB_HOST=postgres`, `DB_PORT=5432`, user/password/db from stack or `stackctl provision-postgres` |
 | Redis      | `redis`        | `REDIS_HOST=redis`, `REDIS_PORT=6379`, `REDIS_PASSWORD` = value of `REDIS_PASSWORD` in `/opt/stack/.env` |
 | MySQL      | `mysql`        | `DB_HOST=mysql`, port `3306`, credentials from provision or root (see operational policy) |
+| 9Router (if enabled) | `9router` | `OPENAI_BASE_URL=http://9router:20128/v1` plus a dashboard-issued API key — see `docs/9ROUTER.md` |
 
 **Example `networks` block for your app:**
 
@@ -185,6 +186,7 @@ If missing, start the stack: `stackctl start core` (creates external networks vi
 - Prefer **backend-only** DB access; use **SSH tunnels** or **127.0.0.1** publishes for ad-hoc admin (this stack binds Redis/Postgres/SeaweedFS API to loopback on the host where configured).
 - **MySQL** may be published on **0.0.0.0:3306** in this stack for restore/tools — **restrict with firewall** to your IP.
 - Put **Portainer**, **Traefik dashboard**, and UIs behind **strong passwords** and optional **Traefik basic auth** (`docs/SUGGESTIONS.md`).
+- **9Router** (if you enable it) is internet-facing: keep `REQUIRE_API_KEY=true` and do not share dashboard passwords or provider tokens.
 
 ---
 
@@ -193,6 +195,7 @@ If missing, start the stack: `stackctl start core` (creates external networks vi
 | Doc | Topic |
 |-----|--------|
 | `docs/TRAEFIK.md` | Labels, TLS, wildcards |
+| `docs/9ROUTER.md` | Optional AI gateway |
 | `docs/POSTGRES.md` | Backups, multiple DBs |
 | `docs/TOOLS.md` | `stackctl`, scripts |
 | `DEPLOY.md` | SSH, firewall, recovery |

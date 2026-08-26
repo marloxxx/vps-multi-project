@@ -21,11 +21,12 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 **CLI install:** `setup.sh` auto-installs `/usr/bin/stackctl` (disable with `AUTO_INSTALL_STACKCTL=0`).
 **Docker auto-install:** enabled by default (`AUTO_INSTALL_DOCKER=1`).  
 **Portainer + Traefik dashboard:** required and started during setup.
-**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `seaweedfs.<base>`, `s3.<base>`).
+**Host alignment:** setup normalises hosts to `BASE_DOMAIN` (e.g. `traefik.<base>`, `portainer.<base>`, `grafana.<base>`, `seaweedfs.<base>`, `s3.<base>`, and `9router.<base>` when 9Router is enabled).
 
 **Non-interactive:** `BASE_DOMAIN=... ACME_EMAIL=... ./setup.sh` when `.env` does not exist yet.
 
 **Skip monitoring:** `START_MONITORING=0 ./setup.sh`  
+**Skip 9Router:** default (opt-in). Enable with `START_9ROUTER=1 ./setup.sh` or answer yes at the prompt.  
 **Custom CLI name:** `STACKCTL_BIN_NAME=vpsctl ./setup.sh`  
 **Disable host sync (advanced):** `SYNC_HOSTS_WITH_BASE_DOMAIN=0 ./setup.sh`
 **Re-run secrets only:** `REGENERATE_SECRETS=1 ./setup.sh` (overwrites password lines in `.env`).
@@ -36,6 +37,7 @@ Setup also generates Traefik dashboard basic-auth credentials if needed.
 |------------|--------|
 | `docs/APP-INTEGRATION.md` | New apps: `proxy` / `backend`, Traefik, DBs |
 | `docs/TRAEFIK.md` | Multi-host, TLS |
+| `docs/9ROUTER.md` | Optional AI gateway (opt-in) |
 | `docs/POSTGRES.md` | Backups, multi-DB |
 | `docs/TOOLS.md` | Operational tools |
 | `docs/SUGGESTIONS.md` | Hardening |
@@ -78,9 +80,11 @@ stackctl menu
 Service groups:
 
 - `core`: `traefik postgres redis seaweedfs mysql` — **SeaweedFS** is started only when it is considered configured (see below); otherwise `stackctl start core` skips it.
-- `all`: `traefik postgres redis seaweedfs monitoring mysql portainer` — same SeaweedFS rule as `core`.
+- `all`: `traefik postgres redis seaweedfs monitoring mysql portainer 9router` — same SeaweedFS rule as `core`. **9Router** is included in `all` only when `START_9ROUTER=1` (or `true` / `yes` / `on`).
 
 **SeaweedFS and `stackctl`:** with `START_SEAWEEDFS=0` (or `false` / `no` / `off`), SeaweedFS is never part of `core` / `all`. With `START_SEAWEEDFS=1` (or `true` / `yes` / `on`), it is always included when the compose file exists. If `START_SEAWEEDFS` is unset, SeaweedFS is included only when `SEAWEEDFS_API_HOST`, `SEAWEEDFS_ADMIN_HOST`, `SEAWEEDFS_ACCESS_KEY`, and `SEAWEEDFS_SECRET_KEY` are all non-empty. To start SeaweedFS regardless: `stackctl start seaweedfs`.
+
+**9Router and `stackctl`:** 9Router is **optional** and not installed by default. With `START_9ROUTER=0` (or unset), it is never part of `all`. With `START_9ROUTER=1`, it is included in `all` when the compose file exists. To start it regardless: `stackctl start 9router`. See `docs/9ROUTER.md`.
 
 Common commands:
 
@@ -130,6 +134,7 @@ stackctl credentials seaweedfs
 stackctl credentials monitoring
 stackctl credentials mysql
 stackctl credentials portainer
+stackctl credentials 9router
 ```
 
 Audit log:

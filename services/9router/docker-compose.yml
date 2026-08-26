@@ -1,0 +1,64 @@
+# Optional: 9Router AI gateway (OpenAI-compatible) behind Traefik.
+# Not started by default. Enable with START_9ROUTER=1 during setup, or:
+#   mkdir -p /opt/volumes/9router
+#   docker compose -f services/9router/docker-compose.yml --env-file ../../.env up -d
+#
+# Dashboard: https://${NINEROUTER_HOST}
+# API:       https://${NINEROUTER_HOST}/v1  (or http://127.0.0.1:20128/v1 on the VPS)
+# Internal:  http://9router:20128/v1 from containers on backend
+#
+# Image: https://hub.docker.com/r/decolua/9router
+# Pin a release tag in production if you need reproducible deploys.
+
+services:
+  ninerouter:
+    image: decolua/9router:latest
+    container_name: 9router
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "20128"
+      DATA_DIR: /app/data
+      BASE_URL: https://${NINEROUTER_HOST}
+      NEXT_PUBLIC_BASE_URL: https://${NINEROUTER_HOST}
+      INITIAL_PASSWORD: ${NINEROUTER_INITIAL_PASSWORD}
+      JWT_SECRET: ${NINEROUTER_JWT_SECRET}
+      API_KEY_SECRET: ${NINEROUTER_API_KEY_SECRET}
+      MACHINE_ID_SALT: ${NINEROUTER_MACHINE_ID_SALT}
+      AUTH_COOKIE_SECURE: "true"
+      REQUIRE_API_KEY: "true"
+    volumes:
+      - ninerouter_data:/app/data
+    # Loopback for CLI tools on the VPS: http://127.0.0.1:20128/v1
+    ports:
+      - "127.0.0.1:20128:20128"
+    networks:
+      - proxy
+      - backend
+    labels:
+      - "traefik.enable=true"
+      # TLS: file-loaded PEM (stack default). Do not set tls.certresolver=letsencrypt.
+      - "traefik.http.routers.ninerouter.rule=Host(`${NINEROUTER_HOST}`)"
+      - "traefik.http.routers.ninerouter.entrypoints=websecure"
+      - "traefik.http.routers.ninerouter.tls=true"
+      - "traefik.http.services.ninerouter.loadbalancer.server.port=20128"
+      # Flush promptly so OpenAI-style SSE / streaming is not buffered.
+      - "traefik.http.services.ninerouter.loadbalancer.responseforwarding.flushinterval=100ms"
+      # Optional: extra basic auth in front of the dashboard (htpasswd → NINEROUTER_TRAEFIK_AUTH)
+      # - "traefik.http.routers.ninerouter.middlewares=ninerouter-auth"
+      # - "traefik.http.middlewares.ninerouter-auth.basicauth.users=${NINEROUTER_TRAEFIK_AUTH}"
+
+volumes:
+  ninerouter_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${NINEROUTER_DATA_DIR:-/opt/volumes/9router}
+
+networks:
+  proxy:
+    external: true
+  backend:
+    external: true

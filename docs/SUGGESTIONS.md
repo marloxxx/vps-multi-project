@@ -31,6 +31,7 @@ Restart Docker after editing.
 - **Rate limiting** – middleware on sensitive routes.
 - **Basic auth** – in front of Portainer/Grafana (see compose comment blocks + htpasswd).
 - **IP allowlist** – middleware to restrict admin UIs to known IPs/VPN.
+- **9Router** (optional) – keep API keys required; do not expose the dashboard without TLS and a strong first-login password (`docs/9ROUTER.md`).
 
 ---
 

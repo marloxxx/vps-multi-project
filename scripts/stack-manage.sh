@@ -14,7 +14,7 @@ ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required."; exit 1; }
 
-SERVICE_LIST="traefik postgres redis seaweedfs monitoring mysql portainer"
+SERVICE_LIST="traefik postgres redis seaweedfs monitoring mysql portainer 9router"
 CORE_LIST="traefik postgres redis seaweedfs mysql"
 LOG_DIR="${STACK_LOG_DIR:-$ROOT/logs}"
 AUDIT_LOG_FILE="${STACK_AUDIT_LOG_FILE:-$LOG_DIR/stackctl.log}"
@@ -88,6 +88,7 @@ service_compose_file() {
     monitoring) echo "$ROOT/services/monitoring/docker-compose.yml" ;;
     mysql) echo "$ROOT/services/mysql/docker-compose.yml" ;;
     portainer) echo "$ROOT/services/portainer/docker-compose.yml" ;;
+    9router|ninerouter) echo "$ROOT/services/9router/docker-compose.yml" ;;
     *)
       echo "Unknown service: $1"
       echo "Valid services: $SERVICE_LIST"
@@ -126,6 +127,16 @@ prepare_seaweedfs_data_dir() {
   mkdir -p "$dir"
 }
 
+# Bind-mounted 9Router data: Docker does not create the host path for driver local + bind.
+prepare_ninerouter_data_dir() {
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+  local dir="${NINEROUTER_DATA_DIR:-/opt/volumes/9router}"
+  mkdir -p "$dir"
+}
+
 # Whether SeaweedFS participates in `core` / `all` (start, stop, restart, health, credentials all).
 # Explicit START_SEAWEEDFS=0|false|no|off → never auto-include.
 # Explicit START_SEAWEEDFS=1|true|yes|on → always auto-include (compose file must exist).
@@ -157,6 +168,28 @@ seaweedfs_included_in_automated_groups() {
   [[ -n "$api" && -n "$admin" && -n "$access" && -n "$secret" ]]
 }
 
+# Whether 9Router participates in `all` (start, stop, restart, health, credentials all).
+# Opt-in: START_9ROUTER=1|true|yes|on → include when compose exists.
+# Unset or START_9ROUTER=0|false|no|off → never auto-include.
+# Explicit `stackctl start 9router` is always honoured.
+ninerouter_included_in_automated_groups() {
+  local ninerouter_compose
+  ninerouter_compose="$(service_compose_file 9router)" || return 1
+  [[ -f "$ninerouter_compose" ]] || return 1
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE" 2>/dev/null || return 1
+  set +a
+
+  local flag
+  flag="$(printf '%s' "${START_9ROUTER-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$flag" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 strip_service_from_list() {
   local list="$1"
   local drop="$2"
@@ -168,7 +201,7 @@ strip_service_from_list() {
   printf '%s' "$out"
 }
 
-# Echoes the service list for `core` or `all` with SeaweedFS removed when not included by policy.
+# Echoes the service list for `core` or `all` with optional services removed when not included by policy.
 resolve_stack_group() {
   local group_name="${1:-}"
   local base=""
@@ -180,11 +213,13 @@ resolve_stack_group() {
       return
       ;;
   esac
-  if seaweedfs_included_in_automated_groups; then
-    printf '%s' "$base"
-    return
+  if ! seaweedfs_included_in_automated_groups; then
+    base="$(strip_service_from_list "$base" seaweedfs)"
   fi
-  strip_service_from_list "$base" seaweedfs
+  if ! ninerouter_included_in_automated_groups; then
+    base="$(strip_service_from_list "$base" 9router)"
+  fi
+  printf '%s' "$base"
 }
 
 compose_run() {
@@ -205,6 +240,7 @@ run_on_group() {
     if [[ "$action" == "up" ]]; then
       [[ "$item" != "mysql" ]] || prepare_mysql_data_dir
       [[ "$item" != "seaweedfs" ]] || prepare_seaweedfs_data_dir
+      [[ "$item" != "9router" ]] || prepare_ninerouter_data_dir
       compose_run "$item" "$action" -d
     else
       compose_run "$item" "$action"
@@ -230,7 +266,7 @@ start_service() {
     all)
       local eff_all
       eff_all="$(resolve_stack_group all)"
-      if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
+      if ! seaweedfs_included_in_automated_groups; then
         echo "Note: SeaweedFS omitted from 'all' (START_SEAWEEDFS=0 or incomplete SEAWEEDFS_* in $ENV_FILE). Use: stackctl start seaweedfs"
         audit_log "start all seaweedfs=skipped_by_policy"
       fi
@@ -239,7 +275,7 @@ start_service() {
     core)
       local eff_core
       eff_core="$(resolve_stack_group core)"
-      if [[ "$eff_core" != "$CORE_LIST" ]]; then
+      if ! seaweedfs_included_in_automated_groups; then
         echo "Note: SeaweedFS omitted from 'core' (START_SEAWEEDFS=0 or incomplete SEAWEEDFS_* in $ENV_FILE). Use: stackctl start seaweedfs"
         audit_log "start core seaweedfs=skipped_by_policy"
       fi
@@ -250,6 +286,17 @@ start_service() {
       echo "==> starting $target"
       [[ "$target" != "mysql" ]] || prepare_mysql_data_dir
       [[ "$target" != "seaweedfs" ]] || prepare_seaweedfs_data_dir
+      if [[ "$target" == "9router" || "$target" == "ninerouter" ]]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "$ENV_FILE"
+        set +a
+        [[ -n "${NINEROUTER_HOST:-}" ]] || {
+          echo "NINEROUTER_HOST is not set in $ENV_FILE. See docs/9ROUTER.md"
+          return 1
+        }
+        prepare_ninerouter_data_dir
+      fi
       compose_run "$target" up -d
       ;;
   esac
@@ -262,7 +309,7 @@ stop_service() {
     all)
       local eff_all
       eff_all="$(resolve_stack_group all)"
-      if [[ "$eff_all" != "$SERVICE_LIST" ]]; then
+      if ! seaweedfs_included_in_automated_groups; then
         audit_log "stop all seaweedfs=skipped_by_policy"
       fi
       run_on_group down "$eff_all"
@@ -270,7 +317,7 @@ stop_service() {
     core)
       local eff_core
       eff_core="$(resolve_stack_group core)"
-      if [[ "$eff_core" != "$CORE_LIST" ]]; then
+      if ! seaweedfs_included_in_automated_groups; then
         audit_log "stop core seaweedfs=skipped_by_policy"
       fi
       run_on_group down "$eff_core"
@@ -423,6 +470,12 @@ show_credentials() {
       show_credentials mysql
       echo ""
       show_credentials portainer
+      echo ""
+      if ninerouter_included_in_automated_groups; then
+        show_credentials 9router
+      else
+        echo "[9router] (skipped — optional; set START_9ROUTER=1 in $ENV_FILE, or: stackctl credentials 9router)"
+      fi
       ;;
     postgres)
       echo "[postgres]"
@@ -456,9 +509,16 @@ show_credentials() {
       print_var PORTAINER_HOST
       print_var PORTAINER_TRAEFIK_AUTH
       ;;
+    9router|ninerouter)
+      echo "[9router]"
+      print_var NINEROUTER_HOST
+      print_var NINEROUTER_INITIAL_PASSWORD
+      print_var NINEROUTER_DATA_DIR
+      print_var NINEROUTER_TRAEFIK_AUTH
+      ;;
     *)
       echo "Unknown credential target: $target"
-      echo "Valid targets: all, postgres, redis, seaweedfs, monitoring, mysql, portainer"
+      echo "Valid targets: all, postgres, redis, seaweedfs, monitoring, mysql, portainer, 9router"
       return 1
       ;;
   esac
@@ -542,6 +602,13 @@ check_service_health() {
         echo "OK   $service is running"
       else
         echo "FAIL $service is not running"
+      fi
+      ;;
+    9router|ninerouter)
+      if is_running 9router; then
+        echo "OK   9router is running"
+      else
+        echo "FAIL 9router is not running"
       fi
       ;;
     postgres)
@@ -910,6 +977,7 @@ Commands:
   restart [core|all|service]   Restart stack/service (default: core)
   health [core|all|service]    Run basic health checks
   SeaweedFS (core/all only): START_SEAWEEDFS=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if SEAWEEDFS_API_HOST, SEAWEEDFS_ADMIN_HOST, SEAWEEDFS_ACCESS_KEY, SEAWEEDFS_SECRET_KEY are all set. Else: stackctl start seaweedfs
+  9Router (all only, opt-in): START_9ROUTER=1|true|yes|on includes; unset/0 excludes. Else: stackctl start 9router
   logs <service>               Follow logs for a service
   backup                       Backup default Postgres database
   backup-all                   Backup all Postgres databases
@@ -1032,7 +1100,7 @@ EOF
         drop_postgres_project "$project" 0
         ;;
       21)
-        read -r -p "Target (all/postgres/redis/seaweedfs/monitoring/mysql/portainer) [all]: " target
+        read -r -p "Target (all/postgres/redis/seaweedfs/monitoring/mysql/portainer/9router) [all]: " target
         show_credentials "${target:-all}"
         ;;
       22)
