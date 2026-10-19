@@ -75,6 +75,7 @@ Attach the **application** containers (not the databases) to **`backend`** and u
 | Redis      | `redis`        | `REDIS_HOST=redis`, `REDIS_PORT=6379`, `REDIS_PASSWORD` = value of `REDIS_PASSWORD` in `/opt/stack/.env` |
 | MySQL      | `mysql`        | `DB_HOST=mysql`, port `3306`, credentials from provision or root (see operational policy) |
 | 9Router (if enabled) | `9router` | `OPENAI_BASE_URL=http://9router:20128/v1` plus a dashboard-issued API key — see `docs/9ROUTER.md` |
+| ClamAV (if enabled) | `clamav` | `CLAMD_HOST=clamav`, `CLAMD_PORT=3310` — see section 8 |
 
 **Example `networks` block for your app:**
 
@@ -148,7 +149,22 @@ For **public** SDKs or browsers, use the **HTTPS hostnames** configured in stack
 
 ---
 
-## 8. Where to put the new project on disk
+## 8. ClamAV (scan uploads, opt-in)
+
+Enable with `START_CLAMAV=1` in stack `.env` (then `stackctl start clamav`). It runs `clamd` on **`backend`** only — attach your app to **`backend`** and talk TCP to **`clamav:3310`** (no auth, never publish it publicly; the host only gets `127.0.0.1:3310`).
+
+Use the **INSTREAM** protocol so the app streams the file bytes, no shared volume needed. Most languages have a client (`clamscan` npm package, `pyclamd`, `clamd` for Go). Quick check from the VPS:
+
+```bash
+echo PING | nc 127.0.0.1 3310      # PONG
+docker exec clamav clamdscan --version
+```
+
+Notes: first start takes a few minutes while signatures load (`docker logs clamav`); needs ~1–2 GB RAM; `services/clamav/clamd.conf` raises `StreamMaxLength` (clamd default 25 MB) and `MaxFileSize` to 100 MB — raise both together if your upload cap is higher. To scan host files instead, mount the folder in `services/clamav/docker-compose.yml` and run `docker exec clamav clamscan -r /scan`.
+
+---
+
+## 9. Where to put the new project on disk
 
 Common layouts (pick one and stay consistent):
 
@@ -172,7 +188,7 @@ If missing, start the stack: `stackctl start core` (creates external networks vi
 
 ---
 
-## 9. Operational pitfalls (avoid re-configuring every deploy)
+## 10. Operational pitfalls (avoid re-configuring every deploy)
 
 1. **Commit** `docker-compose.yml` (and `.env.example`) for your app — including **`external` networks** — so every `git pull` + `up -d` restores wiring.
 2. **Do not** rely on `docker network connect` alone for production; it is easy to lose after recreate.
@@ -181,21 +197,23 @@ If missing, start the stack: `stackctl start core` (creates external networks vi
 
 ---
 
-## 10. Security checklist
+## 11. Security checklist
 
 - Prefer **backend-only** DB access; use **SSH tunnels** or **127.0.0.1** publishes for ad-hoc admin (this stack binds Redis/Postgres/SeaweedFS API to loopback on the host where configured).
 - **MySQL** may be published on **0.0.0.0:3306** in this stack for restore/tools — **restrict with firewall** to your IP.
 - Put **Portainer**, **Traefik dashboard**, and UIs behind **strong passwords** and optional **Traefik basic auth** (`docs/SUGGESTIONS.md`).
 - **9Router** (if you enable it) is internet-facing: keep `REQUIRE_API_KEY=true` and do not share dashboard passwords or provider tokens.
+- **ClamAV** has no authentication: keep it on `backend` and loopback only, never behind Traefik or a public port.
 
 ---
 
-## 11. Related documentation
+## 12. Related documentation
 
 | Doc | Topic |
 |-----|--------|
 | `docs/TRAEFIK.md` | Labels, TLS, wildcards |
 | `docs/9ROUTER.md` | Optional AI gateway |
+| `services/clamav/docker-compose.yml` | Optional ClamAV (clamd) |
 | `docs/POSTGRES.md` | Backups, multiple DBs |
 | `docs/TOOLS.md` | `stackctl`, scripts |
 | `DEPLOY.md` | SSH, firewall, recovery |

@@ -1,0 +1,29 @@
+# Optional: ClamAV (clamd + freshclam). Not started by default.
+# Enable with START_CLAMAV=1 during setup, or: stackctl start clamav
+#
+# Internal:  clamd tcp://clamav:3310 from containers on backend (INSTREAM to scan uploads)
+# Loopback:  127.0.0.1:3310 on the VPS, e.g. clamdscan --stream or `echo PING | nc 127.0.0.1 3310`
+# Scan a host dir: docker exec clamav clamscan -r /scan   (mount it below first)
+#
+# Needs ~1-2 GB RAM; first start takes a few minutes while signatures load.
+
+services:
+  clamav:
+    image: clamav/clamav:stable
+    container_name: clamav
+    restart: unless-stopped
+    volumes:
+      - clamav_db:/var/lib/clamav
+      - ./clamd.conf:/etc/clamav/clamd.conf:ro
+      # - /opt/volumes:/scan:ro
+    ports:
+      - "127.0.0.1:3310:3310"
+    networks:
+      - backend
+
+volumes:
+  clamav_db:
+
+networks:
+  backend:
+    external: true

@@ -14,7 +14,7 @@ ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing $ENV_FILE"; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required."; exit 1; }
 
-SERVICE_LIST="traefik postgres redis seaweedfs monitoring mysql portainer 9router"
+SERVICE_LIST="traefik postgres redis seaweedfs monitoring mysql portainer 9router clamav"
 CORE_LIST="traefik postgres redis seaweedfs mysql"
 LOG_DIR="${STACK_LOG_DIR:-$ROOT/logs}"
 AUDIT_LOG_FILE="${STACK_AUDIT_LOG_FILE:-$LOG_DIR/stackctl.log}"
@@ -89,6 +89,7 @@ service_compose_file() {
     mysql) echo "$ROOT/services/mysql/docker-compose.yml" ;;
     portainer) echo "$ROOT/services/portainer/docker-compose.yml" ;;
     9router|ninerouter) echo "$ROOT/services/9router/docker-compose.yml" ;;
+    clamav) echo "$ROOT/services/clamav/docker-compose.yml" ;;
     *)
       echo "Unknown service: $1"
       echo "Valid services: $SERVICE_LIST"
@@ -219,6 +220,10 @@ resolve_stack_group() {
   if ! ninerouter_included_in_automated_groups; then
     base="$(strip_service_from_list "$base" 9router)"
   fi
+  # Opt-in like 9Router: only in `all` when START_CLAMAV=1|true|yes|on
+  if ! (set -a; source "$ENV_FILE" 2>/dev/null; case "$(printf '%s' "${START_CLAMAV-}" | tr '[:upper:]' '[:lower:]')" in 1|true|yes|on) exit 0 ;; *) exit 1 ;; esac); then
+    base="$(strip_service_from_list "$base" clamav)"
+  fi
   printf '%s' "$base"
 }
 
@@ -334,6 +339,23 @@ restart_service() {
   local target="${1:-core}"
   audit_log "restart target=$target"
   stop_service "$target"
+  start_service "$target"
+}
+
+# Pull newer images, then recreate only containers whose image changed (up -d).
+update_service() {
+  local target="${1:-core}"
+  audit_log "update target=$target"
+  case "$target" in
+    all|core)
+      run_on_group pull "$(resolve_stack_group "$target")"
+      ;;
+    *)
+      require_compose_file "$target"
+      echo "==> pulling $target"
+      compose_run "$target" pull
+      ;;
+  esac
   start_service "$target"
 }
 
@@ -518,7 +540,7 @@ show_credentials() {
       ;;
     *)
       echo "Unknown credential target: $target"
-      echo "Valid targets: all, postgres, redis, seaweedfs, monitoring, mysql, portainer, 9router"
+      echo "Valid targets: all, postgres, redis, seaweedfs, monitoring, mysql, portainer, 9router, clamav"
       return 1
       ;;
   esac
@@ -602,6 +624,13 @@ check_service_health() {
         echo "OK   $service is running"
       else
         echo "FAIL $service is not running"
+      fi
+      ;;
+    clamav)
+      if is_running clamav; then
+        echo "OK   clamav is running"
+      else
+        echo "FAIL clamav is not running"
       fi
       ;;
     9router|ninerouter)
@@ -975,6 +1004,7 @@ Commands:
   start [core|all|service]     Start stack/service (default: core)
   stop [core|all|service]      Stop stack/service (default: core)
   restart [core|all|service]   Restart stack/service (default: core)
+  update [core|all|service]    Pull newer images and recreate changed containers (default: core)
   health [core|all|service]    Run basic health checks
   SeaweedFS (core/all only): START_SEAWEEDFS=1|true|yes|on always includes; =0|false|no|off excludes; unset → include only if SEAWEEDFS_API_HOST, SEAWEEDFS_ADMIN_HOST, SEAWEEDFS_ACCESS_KEY, SEAWEEDFS_SECRET_KEY are all set. Else: stackctl start seaweedfs
   9Router (all only, opt-in): START_9ROUTER=1|true|yes|on includes; unset/0 excludes. Else: stackctl start 9router
@@ -1100,7 +1130,7 @@ EOF
         drop_postgres_project "$project" 0
         ;;
       21)
-        read -r -p "Target (all/postgres/redis/seaweedfs/monitoring/mysql/portainer/9router) [all]: " target
+        read -r -p "Target (all/postgres/redis/seaweedfs/monitoring/mysql/portainer/9router/clamav) [all]: " target
         show_credentials "${target:-all}"
         ;;
       22)
@@ -1120,6 +1150,7 @@ case "$cmd" in
   start) start_service "${2:-core}" ;;
   stop) stop_service "${2:-core}" ;;
   restart) restart_service "${2:-core}" ;;
+  update) update_service "${2:-core}" ;;
   health) health_check "${2:-all}" ;;
   logs) logs_service "${2:-postgres}" ;;
   backup) backup_db ;;

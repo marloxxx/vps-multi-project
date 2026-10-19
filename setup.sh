@@ -126,6 +126,17 @@ prompt_stack_options() {
   grep -qE '^START_SEAWEEDFS=' "$ENV_FILE" || need_banner=1
   grep -qE '^START_MONITORING=' "$ENV_FILE" || need_banner=1
   grep -qE '^START_9ROUTER=' "$ENV_FILE" || need_banner=1
+  if ! grep -qE '^START_CLAMAV=' "$ENV_FILE"; then
+    if [[ -n "${START_CLAMAV:-}" ]]; then
+      set_or_append_env START_CLAMAV "$START_CLAMAV"
+    elif [[ -t 0 ]]; then
+      read -r -p "Install ClamAV (antivirus daemon, ~1-2 GB RAM)? [y/N] " ans
+      if [[ "${ans:-}" =~ ^[Yy] ]]; then set_or_append_env START_CLAMAV "1"; else set_or_append_env START_CLAMAV "0"; fi
+    else
+      set_or_append_env START_CLAMAV "${START_CLAMAV:-0}"
+    fi
+  fi
+
   if [[ "$need_banner" -eq 1 ]]; then
     echo ""
     echo -e "${BOLD}Optional services${NC}"
@@ -529,6 +540,13 @@ docker_phase() {
     fi
   else
     info "9Router skipped (optional — START_9ROUTER=0). Enable later with START_9ROUTER=1 or: stackctl start 9router"
+  fi
+
+  if [[ -f "$ROOT/services/clamav/docker-compose.yml" ]] && is_truthy_flag "${START_CLAMAV:-0}"; then
+    step "Starting ClamAV"
+    docker compose -f "$ROOT/services/clamav/docker-compose.yml" --env-file "$ENV_FILE" up -d
+  else
+    info "ClamAV skipped (optional — START_CLAMAV=0). Enable later with START_CLAMAV=1 or: stackctl start clamav"
   fi
 
 }

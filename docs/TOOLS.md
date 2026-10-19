@@ -60,6 +60,7 @@ stackctl start 9router
 | Dozzle / Loki | Logs |
 | restic / rclone | Off-site backups |
 | fail2ban | On host – already in `setup.sh` |
+| ClamAV | Opt-in container `services/clamav/` (`START_CLAMAV=1`); clamd on `clamav:3310` |
 
 ---
 
@@ -68,4 +69,5 @@ stackctl start 9router
 - **UI:** `services/portainer/`
 - **Metrics:** `services/monitoring/`
 - **9Router (opt-in):** `services/9router/`
+- **ClamAV (opt-in):** `services/clamav/`
 - **Backups:** `stackctl auto-backup` → dumps + optional Google Drive via rclone (`BACKUP_RCLONE_REMOTE`)
